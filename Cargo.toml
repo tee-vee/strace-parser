@@ -1,0 +1,11 @@
+[package]
+name = "strace-parser"
+version = "0.1.0"
+authors = ["Will Chandler <wchandler@gitlab.com>"]
+edition = "2018"
+
+[dependencies]
+chrono = "0.4"
+lazy_static = "1.1.0"
+rayon = "1.0"
+regex = "1.0.5"
