@@ -8,7 +8,7 @@ which can throw off the results.
 
 Example output:
 
-
+```
 PID 13960 - 33 syscalls, 0.981ms, 0.00%
 
   syscall                  count             total             max             avg             min      errors
@@ -48,3 +48,4 @@ Top 10 PIDs
 Total PIDs: 130
 System Time: 2012.987183s
 Real Time: 60.60968s
+```
