@@ -11,18 +11,6 @@ use std::env;
 use std::fs::File;
 use std::io::prelude::*;
 
-enum FieldsPresent {
-    All,
-    PID,
-    Time,
-    Length,
-    PIDTimeLength,
-    PIDTime,
-    PIDLength,
-    TimeLength,
-    Base,
-}
-
 type Pid = i32;
 
 struct SyscallRawData {
@@ -66,17 +54,6 @@ lazy_static! {
     static ref PID_RE: Regex = Regex::new(r"^((?P<pid>\d+)\s+)").unwrap();
 }
 
-lazy_static! {
-    static ref CHECK_RE: Regex = Regex::new(
-        r"(?x)
-        ^((?P<pid>\d+)\s+)
-        ?
-        (?P<time>\d{2}:\d{2}:\d{2}(\.\d+)?)?\s+.*
-        (<(?P<length>.+)>$)
-    "
-    ).unwrap();
-}
-
 fn main() {
     let args: Vec<_> = env::args().collect();
 
@@ -102,8 +79,6 @@ fn main() {
         eprintln!("Error: {} is empty", args[1]);
         std::process::exit(1);
     }
-
-    let _fields = determine_fields(&buffer);
 
     let mut pids: BTreeMap<_, _> = buffer
         .par_lines()
@@ -131,29 +106,6 @@ fn main() {
     println!("System Time: {0:.6}s", all_time / 1000.0);
 
     print_wall_clock_time(&buffer);
-}
-
-fn determine_fields(buffer: &str) -> FieldsPresent {
-    let mut has_pid = false;
-    let mut has_time = false;
-    let mut has_length = false;
-
-    if let Some(caps) = CHECK_RE.captures(&buffer.lines().next().unwrap()) {
-        if let Some(_) = caps.name("pid") {
-            has_pid = true;
-        }
-        if let Some(_) = caps.name("time") {
-            has_time = true;
-        }
-        if let Some(_) = caps.name("length") {
-            has_length = true;
-        }
-    }
-
-    match (has_pid, has_time, has_length) {
-        (true, true, true) => FieldsPresent::All,
-        (_, _, _) => FieldsPresent::Base,
-    }
 }
 
 fn parse_syscall_details<'a>(
