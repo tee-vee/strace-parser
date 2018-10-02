@@ -3,9 +3,8 @@ A small tool to summarize raw `strace` data
 It prints a summary of the syscalls performed in each PID in the `strace`
 session and a list of the top 10 PIDs in terms of running time.
 
-Currently calls like nanosleep and futex are included in the running time,
-which can throw off the results.
-
+Calls like nanosleep and futex can dominate the results, so they may be broken 
+out into a separate metric.
 Example output:
 
 ```
