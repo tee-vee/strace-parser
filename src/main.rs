@@ -13,25 +13,89 @@ use std::io::prelude::*;
 
 type Pid = i32;
 
-struct SyscallRawData {
-    times: Vec<f32>,
-    errors: BTreeMap<String, Pid>,
+struct RawData<'a> {
+    pid: Pid,
+    syscall: &'a str,
+    length: f32,
+    error: Option<&'a str>,
 }
 
-struct SyscallStats {
-    name: String,
+impl<'a> RawData<'a> {
+    fn parse_new(
+        pid_str: &'a str,
+        syscall: &'a str,
+        length_str: &'a str,
+        error: Option<&'a str>,
+    ) -> Option<RawData<'a>> {
+        match (pid_str.parse::<Pid>(), length_str.parse::<f32>()) {
+            (Ok(pid), Ok(length)) => Some(RawData {
+                pid,
+                syscall,
+                length,
+                error,
+            }),
+            _ => None,
+        }
+    }
+}
+struct SyscallData<'a> {
+    times: Vec<f32>,
+    errors: BTreeMap<&'a str, Pid>,
+}
+
+impl<'a> SyscallData<'a> {
+    fn new() -> SyscallData<'a> {
+        SyscallData {
+            times: Vec::new(),
+            errors: BTreeMap::new(),
+        }
+    }
+}
+
+struct SyscallStats<'a> {
+    name: &'a str,
     count: i32,
     total: f32,
     max: f32,
     avg: f32,
     min: f32,
-    errors: BTreeMap<String, i32>,
+    errors: BTreeMap<&'a str, i32>,
+}
+
+impl<'a> SyscallStats<'a> {
+    fn new(
+        name: &'a str,
+        count: i32,
+        total: f32,
+        max: f32,
+        avg: f32,
+        min: f32,
+        errors: BTreeMap<&'a str, i32>,
+    ) -> SyscallStats<'a> {
+        SyscallStats {
+            name,
+            count,
+            total,
+            max,
+            avg,
+            min,
+            errors,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct PidSummary {
     syscall_count: i32,
+    active_time: f32,
+    wait_time: f32,
     total_time: f32,
+}
+
+enum SortBy {
+    ActiveTime,
+    Pid,
+    TotalTime,
 }
 
 lazy_static! {
@@ -43,7 +107,8 @@ lazy_static! {
         (=\s+(-)?\d+\s+(?P<error_code>E[A-Z]+)?).*
         (<(?P<length>\d+\.\d+)>$)
     "
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 lazy_static! {
@@ -80,16 +145,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut pids: BTreeMap<_, _> = buffer
-        .par_lines()
-        .filter_map(|l| PID_RE.captures(&l).and_then(|cap| cap.name("pid")))
-        .map(|c| c.as_str().parse::<Pid>().unwrap())
-        .map(|c| (c, HashMap::new()))
-        .collect();
+    let syscall_data = parse_syscall_data(&buffer);
 
-    parse_syscall_details(&buffer, &mut pids);
-
-    let syscall_stats = build_syscall_stats(&pids);
+    let syscall_stats = build_syscall_stats(&syscall_data);
 
     let pid_summaries = build_pid_summaries(&syscall_stats);
 
@@ -98,62 +156,84 @@ fn main() {
         .fold_with(0.0, |acc, (_, summary)| acc + summary.total_time)
         .sum();
 
-    print_syscall_stats(&syscall_stats, &pid_summaries, all_time);
+    let all_active_time = pid_summaries
+        .par_iter()
+        .fold_with(0.0, |acc, (_, summary)| acc + summary.active_time)
+        .sum();
 
-    print_n_pid_summaries(&pid_summaries, all_time, Some(10));
+    print_pid_details(
+        &syscall_stats,
+        &pid_summaries,
+        all_active_time,
+        all_time,
+        SortBy::ActiveTime,
+    );
 
-    println!("Total PIDs: {}", pids.len());
+    print_pid_summaries(
+        &pid_summaries,
+        all_active_time,
+        Some(10),
+        SortBy::ActiveTime,
+    );
+
+    println!("Total PIDs: {}", pid_summaries.len());
     println!("System Time: {0:.6}s", all_time / 1000.0);
 
     print_wall_clock_time(&buffer);
 }
 
-fn parse_syscall_details<'a>(
-    buffer: &'a str,
-    pids: &mut BTreeMap<Pid, HashMap<&'a str, SyscallRawData>>,
-) {
-    for line in buffer.lines() {
-        if let Some(caps) = ALL_RE.captures(line) {
-            match (caps.name("pid"), caps.name("syscall"), caps.name("length")) {
-                (Some(pid), Some(syscall), Some(length)) => {
-                    let pid_entry = pids
-                        .get_mut(&pid.as_str().parse::<Pid>().unwrap())
-                        .unwrap()
-                        .entry(syscall.as_str())
-                        .or_insert(SyscallRawData {
-                            times: Vec::new(),
-                            errors: BTreeMap::new(),
-                        });
-
-                    pid_entry
-                        .times
-                        .push(length.as_str().parse::<f32>().unwrap());
-
-                    if let Some(error) = caps.name("error_code") {
-                        let error_entry = pid_entry
-                            .errors
-                            .entry(error.as_str().to_string())
-                            .or_insert(0);
-                        *error_entry += 1;
-                    }
+fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, HashMap<&'a str, SyscallData<'a>>> {
+    let parsed_data: Vec<_> = buffer
+        .par_lines()
+        .filter_map(|line| ALL_RE.captures(line))
+        .map(|caps| {
+            match (
+                caps.name("pid"),
+                caps.name("syscall"),
+                caps.name("length"),
+                caps.name("error_code"),
+            ) {
+                (Some(pid), Some(syscall), Some(length), Some(error)) => RawData::parse_new(
+                    pid.as_str(),
+                    syscall.as_str(),
+                    length.as_str(),
+                    Some(error.as_str()),
+                ),
+                (Some(pid), Some(syscall), Some(length), None) => {
+                    RawData::parse_new(pid.as_str(), syscall.as_str(), length.as_str(), None)
                 }
-                _ => {}
+                _ => None,
+            }
+        })
+        .collect();
+
+    let mut syscall_data = HashMap::new();
+    for event_data in parsed_data {
+        if let Some(data) = event_data {
+            let pid_entry = syscall_data.entry(data.pid).or_insert(HashMap::new());
+            let syscall_entry = pid_entry.entry(data.syscall).or_insert(SyscallData::new());
+
+            syscall_entry.times.push(data.length);
+            if let Some(error) = data.error {
+                let error_entry = syscall_entry.errors.entry(error).or_insert(0);
+                *error_entry += 1;
             }
         }
     }
+
+    syscall_data
 }
 
-fn build_syscall_stats(
-    pids: &BTreeMap<Pid, HashMap<&str, SyscallRawData>>,
-) -> BTreeMap<Pid, Vec<SyscallStats>> {
+fn build_syscall_stats<'a>(
+    data: &HashMap<Pid, HashMap<&'a str, SyscallData<'a>>>,
+) -> BTreeMap<Pid, Vec<SyscallStats<'a>>> {
     let mut syscall_stats = BTreeMap::new();
 
-    for (pid, syscalls) in pids {
+    for (pid, syscalls) in data {
         let mut event_stats: Vec<_> = syscalls
             .par_iter()
             .map(|(syscall, raw_data)| {
                 let total: f32 = raw_data.times.par_iter().sum();
-                let total = total * 1000.0;
                 let max = raw_data
                     .times
                     .par_iter()
@@ -166,19 +246,20 @@ fn build_syscall_stats(
                     .min_by(|x, y| x.partial_cmp(y).unwrap())
                     .unwrap()
                     * 1000.0;
-                let avg = total / raw_data.times.len() as f32;
+                let avg = (total * 1000.0) / raw_data.times.len() as f32;
                 let errors = raw_data.errors.clone();
 
-                SyscallStats {
-                    name: syscall.to_string(),
-                    count: raw_data.times.len() as i32,
-                    total,
+                SyscallStats::new(
+                    syscall,
+                    raw_data.times.len() as i32,
+                    total * 1000.0,
                     max,
                     avg,
                     min,
                     errors,
-                }
-            }).collect();
+                )
+            })
+            .collect();
 
         event_stats.par_sort_by(|x, y| (y.total).partial_cmp(&x.total).unwrap());
 
@@ -190,23 +271,41 @@ fn build_syscall_stats(
 
 fn build_pid_summaries(
     syscall_stats: &BTreeMap<Pid, Vec<SyscallStats>>,
-) -> BTreeMap<Pid, PidSummary> {
-    let mut pid_summaries = BTreeMap::new();
+) -> HashMap<Pid, PidSummary> {
+    let mut pid_summaries = HashMap::new();
 
     for (pid, stats) in syscall_stats {
         let syscall_count = stats
             .par_iter()
             .fold_with(0, |acc, event_stats| acc + event_stats.count)
             .sum();
-        let total_time = stats
-            .par_iter()
-            .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
-            .sum();
+
+        let active_time = stats
+            .iter()
+            .filter(|stat| match stat.name.as_ref() {
+                "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
+                | "select" | "wait4" => false,
+                _ => true,
+            })
+            .fold(0.0, |acc, event_stats| acc + event_stats.total);
+
+        let wait_time = stats
+            .iter()
+            .filter(|stat| match stat.name.as_ref() {
+                "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
+                | "select" | "wait4" => true,
+                _ => false,
+            })
+            .fold(0.0, |acc, event_stats| acc + event_stats.total);
+
+        let total_time = active_time + wait_time;
 
         pid_summaries.insert(
             *pid,
             PidSummary {
                 syscall_count,
+                active_time,
+                wait_time,
                 total_time,
             },
         );
@@ -215,38 +314,39 @@ fn build_pid_summaries(
     pid_summaries
 }
 
-fn print_syscall_stats(
+fn print_pid_details(
     syscall_stats: &BTreeMap<Pid, Vec<SyscallStats>>,
-    pid_summaries: &BTreeMap<Pid, PidSummary>,
+    pid_summaries: &HashMap<Pid, PidSummary>,
+    all_active_time: f32,
     all_time: f32,
+    sort_by: SortBy,
 ) {
-    for (pid, syscalls) in syscall_stats {
-        let syscall_count = pid_summaries[pid].syscall_count;
-        let total_time = pid_summaries[pid].total_time;
-        let perc_time = total_time / all_time * 100.0;
-
-        if syscall_count == 0 {
+    for (pid, summary) in sort_pid_summaries(&pid_summaries, sort_by).iter() {
+        if summary.syscall_count == 0 {
             continue;
         };
 
+        let perc_active_time = summary.active_time / all_active_time * 100.0;
+        let perc_total_time = summary.total_time / all_time * 100.0;
+
         println!(
-            "PID {0} - {1} syscalls, {2:.3}ms, {3:.2}%\n",
-            pid, syscall_count, total_time, perc_time
-        );
+                "PID {0} - {1} syscalls, active {2:.3}ms, total {3:.3}ms, active {4:.2}%, total {5:.2}%\n",
+                pid, summary.syscall_count, summary.active_time, summary.total_time, perc_active_time, perc_total_time
+            );
         println!(
-            "  {0: <15}\t{1: >8}\t{2: >10.6}\t{3: >10.6}\t{4: >10.6}\t{5: >10.6}\t{6: <8}",
+            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
             "syscall", "count", "total", "max", "avg", "min", "errors"
         );
         println!(
-            "  {0: <15}\t{1: >8}\t{2: >10.6}\t{3: >10.6}\t{4: >10.6}\t{5: >10.6}\t{6: >4}",
+            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
             "", "", "(ms)", "(ms)", "(ms)", "(ms)", ""
         );
         println!(
             "  ---------------\t--------\t----------\t----------\t----------\t----------\t--------"
         );
-        for s in syscalls {
+        for s in &syscall_stats[pid] {
             print!(
-                "  {0: <15}\t{1: >8}\t{2: >10.6}\t{3: >10.6}\t{4: >10.6}\t{5: >10.6}",
+                "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}",
                 s.name, s.count, s.total, s.max, s.avg, s.min
             );
             if !s.errors.is_empty() {
@@ -260,14 +360,21 @@ fn print_syscall_stats(
     }
 }
 
-fn print_n_pid_summaries(
-    pid_summaries: &BTreeMap<Pid, PidSummary>,
-    all_time: f32,
+fn print_pid_summaries(
+    pid_summaries: &HashMap<Pid, PidSummary>,
+    all_active_time: f32,
     count: Option<i32>,
+    sort_by: SortBy,
 ) {
     let count_to_print = match count {
         None => pid_summaries.len(),
-        Some(i) => i as usize,
+        Some(i) => {
+            if i as usize > pid_summaries.len() {
+                pid_summaries.len()
+            } else {
+                i as usize
+            }
+        }
     };
 
     if let Some(n) = count {
@@ -275,34 +382,51 @@ fn print_n_pid_summaries(
     }
 
     println!(
-        "  {0: <10}\t{1: >10}\t{2: >9}\t{3: >9}",
-        "pid", "time (ms)", "% time", "calls"
+        "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
+        "pid", "active (ms)", "wait (ms)", "total (ms)", "% active", "calls"
     );
-    println!("  ----------\t----------\t---------\t---------");
+    println!("  ----------\t----------\t---------\t---------\t---------\t---------");
 
-    for (pid, summary) in get_sorted_pid_summaries(&pid_summaries)
+    for (pid, summary) in sort_pid_summaries(&pid_summaries, sort_by)
         .iter()
         .take(count_to_print)
     {
         println!(
-            "  {0: <10}\t{1: >10.3}\t{2: >8.2}%\t{3: >9}",
+            "  {0: <10}\t{1: >10.3}\t{2: >10.3}\t{3: >10.3}\t{4: >8.2}%\t{5: >9}",
             pid,
+            summary.active_time,
+            summary.wait_time,
             summary.total_time,
-            summary.total_time / all_time * 100.0,
+            summary.active_time / all_active_time * 100.0,
             summary.syscall_count
         );
     }
     println!("");
 }
 
-fn get_sorted_pid_summaries(pid_summaries: &BTreeMap<Pid, PidSummary>) -> Vec<(Pid, PidSummary)> {
+fn sort_pid_summaries(
+    pid_summaries: &HashMap<Pid, PidSummary>,
+    sort_by: SortBy,
+) -> Vec<(Pid, PidSummary)> {
     let mut sorted_summaries: Vec<_> = pid_summaries
         .par_iter()
         .map(|(pid, summary)| (*pid, (*summary).clone()))
         .collect();
 
-    sorted_summaries
-        .par_sort_by(|(_, x), (_, y)| (y.total_time).partial_cmp(&x.total_time).unwrap());
+    match sort_by {
+        SortBy::ActiveTime => {
+            sorted_summaries
+                .par_sort_by(|(_, x), (_, y)| (y.active_time).partial_cmp(&x.active_time).unwrap());
+        }
+        SortBy::Pid => {
+            sorted_summaries
+                .par_sort_by(|(pid_x, _), (pid_y, _)| (pid_y).partial_cmp(&pid_x).unwrap());
+        }
+        SortBy::TotalTime => {
+            sorted_summaries
+                .par_sort_by(|(_, x), (_, y)| (y.total_time).partial_cmp(&x.total_time).unwrap());
+        }
+    }
 
     sorted_summaries
 }
@@ -318,14 +442,19 @@ fn print_wall_clock_time(buffer: &str) {
 
     match (start_time_cap, end_time_cap) {
         (Some(start), Some(end)) => {
-            let start_time = NaiveTime::parse_from_str(start.as_str(), "%H:%M:%S%.6f").unwrap();
-            let end_time = NaiveTime::parse_from_str(end.as_str(), "%H:%M:%S%.6f").unwrap();
-            let wall_clock_time = end_time - start_time;
-            println!(
-                "Real Time: {}.{}s",
-                wall_clock_time.num_seconds(),
-                wall_clock_time.num_milliseconds()
-            );
+            let start_time = NaiveTime::parse_from_str(start.as_str(), "%H:%M:%S%.6f");
+            let end_time = NaiveTime::parse_from_str(end.as_str(), "%H:%M:%S%.6f");
+            match (start_time, end_time) {
+                (Ok(start), Ok(end)) => {
+                    let wall_clock_time = end - start;
+                    println!(
+                        "Real Time: {}.{}s",
+                        wall_clock_time.num_seconds(),
+                        wall_clock_time.num_milliseconds()
+                    );
+                }
+                _ => (),
+            }
         }
         _ => {}
     }
