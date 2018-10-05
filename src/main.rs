@@ -241,7 +241,7 @@ fn main() {
 
     let count_to_print = match matches.value_of("count") {
         Some(c) => c.parse::<usize>().unwrap(),
-        _ => 10,
+        _ => 25,
     };
 
     let pid_to_print = {
