@@ -6,7 +6,7 @@ extern crate regex;
 use chrono::NaiveTime;
 use rayon::prelude::*;
 use regex::Regex;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -21,7 +21,7 @@ struct RawData<'a> {
 }
 
 impl<'a> RawData<'a> {
-    fn parse_new(
+    fn from_strs(
         pid_str: &'a str,
         syscall: &'a str,
         length_str: &'a str,
@@ -84,6 +84,23 @@ impl<'a> SyscallStats<'a> {
     }
 }
 
+struct SendRecvStats {
+    send: i64,
+    recv: i64,
+}
+
+impl SendRecvStats {
+    fn new() -> SendRecvStats {
+        SendRecvStats { send: 0, recv: 0 }
+    }
+}
+
+#[derive(Debug)]
+enum SendRecv {
+    Send,
+    Recv,
+}
+
 #[derive(Clone)]
 struct PidSummary {
     syscall_count: i32,
@@ -112,11 +129,28 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref TIME_RE: Regex = Regex::new(r"^\d+\s+(?P<time>\d{2}:\d{2}:\d{2}\.\d{6})").unwrap();
+    static ref FILE_RE: Regex =
+        Regex::new(r#"^((?P<pid>\d+)\s+\d{2}:\d{2}:\d{2}\.\d+\s+open\("(?P<file>[^"]+)")"#)
+            .unwrap();
 }
 
 lazy_static! {
     static ref PID_RE: Regex = Regex::new(r"^((?P<pid>\d+)\s+)").unwrap();
+}
+
+lazy_static! {
+    static ref SOCKET_RE: Regex = Regex::new(
+        r"(?x)
+    ^(?P<pid>\d+)\s+\d{2}:\d{2}:\d{2}\.\d+\s+(<\.\.\.\s+)?
+    (?P<send_recv>send|sendmsg|sendto|recv|recvmsg|recvfrom)
+    (\(|\sresumed>).*\s=\s
+    (?P<bytes>\d+)"
+    )
+    .unwrap();
+}
+
+lazy_static! {
+    static ref TIME_RE: Regex = Regex::new(r"^\d+\s+(?P<time>\d{2}:\d{2}:\d{2}\.\d{6})").unwrap();
 }
 
 fn main() {
@@ -151,6 +185,10 @@ fn main() {
 
     let pid_summaries = build_pid_summaries(&syscall_stats);
 
+    let file_summaries = parse_file_data(&buffer);
+
+    let socket_summaries = parse_socket_data(&buffer);
+
     let all_time = pid_summaries
         .par_iter()
         .fold_with(0.0, |acc, (_, summary)| acc + summary.total_time)
@@ -176,6 +214,10 @@ fn main() {
         SortBy::ActiveTime,
     );
 
+    print_files_opened(&file_summaries, Some(817));
+
+    print_socket_traffic(&socket_summaries, None);
+
     println!("Total PIDs: {}", pid_summaries.len());
     println!("System Time: {0:.6}s", all_time / 1000.0);
 
@@ -193,14 +235,14 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, HashMap<&'a str, Sysc
                 caps.name("length"),
                 caps.name("error_code"),
             ) {
-                (Some(pid), Some(syscall), Some(length), Some(error)) => RawData::parse_new(
+                (Some(pid), Some(syscall), Some(length), Some(error)) => RawData::from_strs(
                     pid.as_str(),
                     syscall.as_str(),
                     length.as_str(),
                     Some(error.as_str()),
                 ),
                 (Some(pid), Some(syscall), Some(length), None) => {
-                    RawData::parse_new(pid.as_str(), syscall.as_str(), length.as_str(), None)
+                    RawData::from_strs(pid.as_str(), syscall.as_str(), length.as_str(), None)
                 }
                 _ => None,
             }
@@ -222,6 +264,64 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, HashMap<&'a str, Sysc
     }
 
     syscall_data
+}
+fn parse_file_data<'a>(buffer: &'a str) -> HashMap<Pid, HashSet<&'a str>> {
+    let parsed_data: Vec<_> = buffer
+        .par_lines()
+        .filter_map(|line| FILE_RE.captures(line))
+        .map(|caps| match (caps.name("pid"), caps.name("file")) {
+            (Some(pid), Some(file)) => Some((pid.as_str().parse::<Pid>().unwrap(), file.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    let mut file_data = HashMap::new();
+    for event_data in parsed_data {
+        if let Some((pid, file_name)) = event_data {
+            let pid_entry = file_data.entry(pid).or_insert(HashSet::new());
+            pid_entry.insert(file_name);
+        }
+    }
+
+    file_data
+}
+
+fn parse_socket_data(buffer: &str) -> HashMap<Pid, SendRecvStats> {
+    let parsed_socket_data: Vec<_> = buffer
+        .par_lines()
+        .filter_map(|line| SOCKET_RE.captures(line))
+        .map(
+            |caps| match (caps.name("pid"), caps.name("send_recv"), caps.name("bytes")) {
+                (Some(pid_cap), Some(send_recv), Some(bytes_cap)) => {
+                    match (
+                        pid_cap.as_str().parse::<Pid>(),
+                        bytes_cap.as_str().parse::<i64>(),
+                    ) {
+                        (Ok(pid), Ok(bytes)) => match send_recv.as_str() {
+                            "send" | "sendmsg" | "sendto" => Some((pid, SendRecv::Send, bytes)),
+                            "recv" | "recvmsg" | "recvfrom" => Some((pid, SendRecv::Recv, bytes)),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+        )
+        .collect();
+
+    let mut socket_data = HashMap::new();
+    for socket_event in parsed_socket_data {
+        if let Some((pid, send_rcvd, bytes)) = socket_event {
+            let pid_entry = socket_data.entry(pid).or_insert(SendRecvStats::new());
+            match send_rcvd {
+                SendRecv::Send => pid_entry.send += bytes,
+                SendRecv::Recv => pid_entry.recv += bytes,
+            }
+        }
+    }
+
+    socket_data
 }
 
 fn build_syscall_stats<'a>(
@@ -431,6 +531,45 @@ fn sort_pid_summaries(
     sorted_summaries
 }
 
+fn print_files_opened(file_data: &HashMap<Pid, HashSet<&str>>, pid_to_print: Option<Pid>) {
+    if let Some(pid) = pid_to_print {
+        if let Some(file_names) = file_data.get(&pid) {
+            println!("Files opened by PID {}: {}", pid, file_names.len());
+            for file in file_names {
+                println!("{}", file);
+            }
+            println!("");
+        } else {
+            println!("PID {} not found\n", pid);
+            return;
+        }
+    } else {
+        for (pid, file_names) in file_data {
+            println!("Files opened by PID {}: {}", pid, file_names.len());
+            for file in file_names {
+                println!("{}", file);
+            }
+        }
+        println!("");
+    }
+}
+
+fn print_socket_traffic(socket_data: &HashMap<Pid, SendRecvStats>, pid_to_print: Option<Pid>) {
+    if let Some(pid) = pid_to_print {
+        if let Some(socket) = socket_data.get(&pid) {
+            println!("Socket traffic for PID {}", pid);
+            println!("Sent: {}B\nReceived: {}B\n", socket.send, socket.recv);
+        } else {
+            println!("PID {} not found\n", pid);
+        }
+    } else {
+        for (pid, socket) in socket_data {
+            println!("Socket traffic from PID {}", pid);
+            println!("Sent: {}B\nReceived: {}B\n", socket.send, socket.recv);
+        }
+    }
+}
+
 fn print_wall_clock_time(buffer: &str) {
     let start_line = buffer.lines().next().unwrap();
     let start_time_cap = TIME_RE
@@ -453,7 +592,7 @@ fn print_wall_clock_time(buffer: &str) {
                         wall_clock_time.num_milliseconds()
                     );
                 }
-                _ => (),
+                _ => {}
             }
         }
         _ => {}
