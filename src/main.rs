@@ -150,13 +150,6 @@ fn validate_pid(p: String) -> Result<(), String> {
     Err(String::from("PID must be an integer"))
 }
 
-fn validate_file_count(f: String) -> Result<(), String> {
-    if let Ok(_) = f.parse::<usize>() {
-        return Ok(());
-    }
-    Err(String::from("FILE_COUNT must be a non-negative integer"))
-}
-
 fn validate_count(c: String) -> Result<(), String> {
     if let Ok(_) = c.parse::<usize>() {
         return Ok(());
@@ -220,17 +213,6 @@ fn main() {
                 .conflicts_with("pid"),
         )
         .arg(
-            Arg::with_name("file_count")
-                .short("f")
-                .long("file_count")
-                .value_name("FILE_COUNT")
-                .requires("stats")
-                .default_value_if("stats", None, "5")
-                .help("Number of opened files to print with stats")
-                .validator(validate_file_count)
-                .takes_value(true),
-        )
-        .arg(
             Arg::with_name("INPUT")
                 .help("Sets file to be parsed")
                 .required(true)
@@ -268,11 +250,6 @@ fn main() {
         Some("pid") => SortBy::Pid,
         Some("total_time") => SortBy::TotalTime,
         _ => SortBy::ActiveTime,
-    };
-
-    let file_count = match matches.value_of("file_count") {
-        Some(f) => f.parse::<usize>().unwrap(),
-        _ => 5,
     };
 
     let file_name = matches.value_of("INPUT").unwrap();
@@ -317,7 +294,6 @@ fn main() {
             all_time,
             count_to_print,
             sort_by,
-            file_count,
         ),
         Print::Pid(pid_to_print) => print_pid_details(&pid_summaries, pid_to_print),
     }
@@ -514,7 +490,6 @@ fn print_pid_stats(
     all_time: f32,
     count_to_print: usize,
     sort_by: SortBy,
-    file_count: usize,
 ) {
     let count = {
         if count_to_print > pid_summaries.len() {
@@ -566,11 +541,11 @@ fn print_pid_stats(
 
         if !summary.files.is_empty() {
             println!("Files opened:");
-            if summary.files.len() > file_count {
-                for f in summary.files.iter().take(file_count) {
+            if summary.files.len() > 5 {
+                for f in summary.files.iter().take(5) {
                     println!("{}", f);
                 }
-                println!("And {} more...", summary.files.len() - file_count);
+                println!("And {} more...", summary.files.len() - 5);
             } else {
                 for f in summary.files.iter() {
                     println!("{}", f);
