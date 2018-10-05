@@ -597,9 +597,7 @@ fn print_pid_summaries(
         }
     };
 
-    if count_to_print < pid_summaries.len() {
-        println!("Top {} PIDs\n-----------\n", count_to_print);
-    }
+    println!("Top {} PIDs\n-----------\n", count);
 
     println!(
         "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
