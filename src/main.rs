@@ -4,11 +4,12 @@ extern crate lazy_static;
 extern crate rayon;
 extern crate regex;
 
-use chrono::NaiveTime;
+use chrono::{Duration, NaiveTime};
 use clap::{App, Arg};
 use rayon::prelude::*;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -89,6 +90,22 @@ impl<'a> SyscallStats<'a> {
     }
 }
 
+impl<'a> fmt::Display for SyscallStats<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}",
+            self.name, self.count, self.total, self.max, self.avg, self.min
+        )?;
+
+        for (err, count) in self.errors.iter() {
+            write!(f, "\t{}: {}", err, count)?;
+        }
+
+        Ok(())
+    }
+}
+
 struct PidData<'a> {
     syscall_data: HashMap<&'a str, SyscallData<'a>>,
     files: BTreeSet<&'a str>,
@@ -113,7 +130,84 @@ struct PidSummary<'a> {
     files: BTreeSet<&'a str>,
 }
 
-type PidSummaries<'a> = HashMap<Pid, PidSummary<'a>>;
+impl<'a> fmt::Display for PidSummary<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "{0} syscalls, active time: {1:.3}ms, total time: {2:.3}ms\n",
+            self.syscall_count, self.active_time, self.total_time
+        );
+        writeln!(
+            f,
+            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
+            "syscall", "count", "total", "max", "avg", "min", "errors"
+        );
+        writeln!(
+            f,
+            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
+            "", "", "(ms)", "(ms)", "(ms)", "(ms)", ""
+        );
+        writeln!(
+            f,
+            "  ---------------\t--------\t----------\t----------\t----------\t----------\t--------"
+        );
+        for s in &self.syscall_stats {
+            writeln!(f, "{}", s);
+        }
+
+        Ok(())
+    }
+}
+
+struct SessionSummary<'a> {
+    pid_summaries: HashMap<Pid, PidSummary<'a>>,
+    all_time: f32,
+    all_active_time: f32,
+}
+
+impl<'a> SessionSummary<'a> {
+    fn new() -> SessionSummary<'a> {
+        SessionSummary {
+            pid_summaries: HashMap::new(),
+            all_time: 0.0,
+            all_active_time: 0.0,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.pid_summaries.len()
+    }
+
+    fn to_sorted_summaries(&self, sort_by: SortBy) -> Vec<(Pid, PidSummary<'a>)> {
+        let mut sorted_summaries: Vec<_> = self
+            .pid_summaries
+            .par_iter()
+            .map(|(pid, summary)| (*pid, (*summary).clone()))
+            .collect();
+
+        match sort_by {
+            SortBy::ActiveTime => {
+                sorted_summaries.par_sort_by(|(_, x), (_, y)| {
+                    (y.active_time)
+                        .partial_cmp(&x.active_time)
+                        .expect("Invalid comparison on active times")
+                });
+            }
+            SortBy::Pid => {
+                sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
+            }
+            SortBy::TotalTime => {
+                sorted_summaries.par_sort_by(|(_, x), (_, y)| {
+                    (y.total_time)
+                        .partial_cmp(&x.total_time)
+                        .expect("Invalid comparison on total times")
+                });
+            }
+        }
+
+        sorted_summaries
+    }
+}
 
 enum SortBy {
     ActiveTime,
@@ -127,12 +221,14 @@ enum Print {
     Pid(Pid),
 }
 
+static PRINT_FILE_COUNT: usize = 5;
+
 lazy_static! {
     static ref ALL_RE: Regex = Regex::new(
         r#"(?x)
         ^(?P<pid>\d+)[^a-zA-Z]+
-        (?P<syscall>\w+)(\("(?P<file>[^"]+)")?[^)]+\)\s+
-        =\s+(-)?\d+(<[^>]+>)?\s+((?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
+        (?P<syscall>\w+)(:?\(:?"(?P<file>[^"]+)")?[^)]+\)\s+
+        =\s+(-)?\d+(<[^>]+>)?\s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
         <(?P<length>\d+\.\d+)?>$
     "#
     )
@@ -163,19 +259,11 @@ fn main() {
         .author("Will Chandler <wchandler@gitlab.com")
         .about("Summarizes raw strace output")
         .arg(
-            Arg::with_name("top")
-                .short("t")
-                .long("top")
-                .help("Prints a summary of top COUNT PIDs. Default option")
-                .display_order(1),
-        )
-        .arg(
             Arg::with_name("stats")
                 .short("s")
                 .long("stats")
                 .help("Prints a breakdown of syscall stats for COUNT PIDs")
-                .display_order(2)
-                .conflicts_with("top"),
+                .display_order(1),
         )
         .arg(
             Arg::with_name("pid")
@@ -185,18 +273,16 @@ fn main() {
                 .validator(validate_pid)
                 .help("Print details of a specific PID")
                 .takes_value(true)
-                .conflicts_with("summary")
-                .conflicts_with("top"),
+                .conflicts_with("summary"),
         )
         .arg(
             Arg::with_name("count")
                 .short("c")
                 .long("count")
                 .value_name("COUNT")
-                .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
+                .default_value_if("top", None, "25")
                 .help("The number of PIDs to print")
                 .validator(validate_count)
-                .conflicts_with("pid")
                 .takes_value(true),
         )
         .arg(
@@ -204,13 +290,9 @@ fn main() {
                 .short("S")
                 .long("sort")
                 .possible_values(&["active_time", "pid", "total_time"])
-                .default_value_ifs(&[
-                    ("top", None, "active_time"),
-                    ("summary", None, "active_time"),
-                ])
+                .default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
-                .help("Field to sort results by")
-                .conflicts_with("pid"),
+                .help("Field to sort results by"),
         )
         .arg(
             Arg::with_name("INPUT")
@@ -274,34 +356,17 @@ fn main() {
 
     let syscall_data = parse_syscall_data(&buffer);
 
-    let pid_summaries = build_pid_summaries(&syscall_data);
+    let session_summary = build_session_summary(&syscall_data);
 
-    let all_time = pid_summaries
-        .par_iter()
-        .fold_with(0.0, |acc, (_, summary)| acc + summary.total_time)
-        .sum();
-
-    let all_active_time = pid_summaries
-        .par_iter()
-        .fold_with(0.0, |acc, (_, summary)| acc + summary.active_time)
-        .sum();
+    let elapsed_time = parse_elapsed_real_time(&buffer);
 
     match print_mode {
-        Print::Top => print_pid_summaries(&pid_summaries, all_active_time, count_to_print, sort_by),
-        Print::Stats => print_pid_stats(
-            &pid_summaries,
-            all_active_time,
-            all_time,
-            count_to_print,
-            sort_by,
-        ),
-        Print::Pid(pid_to_print) => print_pid_details(&pid_summaries, pid_to_print),
+        Print::Top => {
+            print_session_summary(&session_summary, elapsed_time, count_to_print, sort_by)
+        }
+        Print::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
+        Print::Pid(pid_to_print) => print_pid_details(&session_summary, pid_to_print),
     }
-
-    println!("Total PIDs: {}", pid_summaries.len());
-    println!("System Time: {0:.6}s", all_time / 1000.0);
-
-    print_wall_clock_time(&buffer);
 }
 
 fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
@@ -406,13 +471,19 @@ fn build_syscall_stats<'a>(
                 let max = raw_data
                     .lengths
                     .par_iter()
-                    .max_by(|x, y| x.partial_cmp(y).unwrap())
+                    .max_by(|x, y| {
+                        x.partial_cmp(y)
+                            .expect("Invalid comparison when finding max length")
+                    })
                     .unwrap()
                     * 1000.0;
                 let min = raw_data
                     .lengths
                     .par_iter()
-                    .min_by(|x, y| x.partial_cmp(y).unwrap())
+                    .min_by(|x, y| {
+                        x.partial_cmp(y)
+                            .expect("Invalid comparison when finding min length")
+                    })
                     .unwrap()
                     * 1000.0;
                 let avg = total / raw_data.lengths.len() as f32;
@@ -430,7 +501,11 @@ fn build_syscall_stats<'a>(
             })
             .collect();
 
-        event_stats.par_sort_by(|x, y| (y.total).partial_cmp(&x.total).unwrap());
+        event_stats.par_sort_by(|x, y| {
+            (y.total)
+                .partial_cmp(&x.total)
+                .expect("Invalid comparison wben sorting event_stats")
+        });
 
         syscall_stats.insert(*pid, event_stats);
     }
@@ -438,9 +513,9 @@ fn build_syscall_stats<'a>(
     syscall_stats
 }
 
-fn build_pid_summaries<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> PidSummaries<'a> {
+fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> SessionSummary<'a> {
     let pid_stats = build_syscall_stats(&syscall_data);
-    let mut pid_summaries = HashMap::new();
+    let mut session_summary = SessionSummary::new();
 
     for (pid, syscall_stats) in pid_stats {
         let syscall_count = syscall_stats
@@ -449,26 +524,28 @@ fn build_pid_summaries<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> PidSumma
             .sum();
 
         let active_time = syscall_stats
-            .iter()
+            .par_iter()
             .filter(|stat| match stat.name.as_ref() {
                 "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
                 | "select" | "wait4" => false,
                 _ => true,
             })
-            .fold(0.0, |acc, event_stats| acc + event_stats.total);
+            .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
+            .sum();
 
         let wait_time = syscall_stats
-            .iter()
+            .par_iter()
             .filter(|stat| match stat.name.as_ref() {
                 "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
                 | "select" | "wait4" => true,
                 _ => false,
             })
-            .fold(0.0, |acc, event_stats| acc + event_stats.total);
+            .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
+            .sum();
 
         let total_time = active_time + wait_time;
 
-        pid_summaries.insert(
+        session_summary.pid_summaries.insert(
             pid,
             PidSummary {
                 syscall_count,
@@ -481,96 +558,65 @@ fn build_pid_summaries<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> PidSumma
         );
     }
 
-    pid_summaries
+    session_summary.all_time = session_summary
+        .pid_summaries
+        .par_iter()
+        .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.total_time)
+        .sum();
+
+    session_summary.all_active_time = session_summary
+        .pid_summaries
+        .par_iter()
+        .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.active_time)
+        .sum();
+
+    session_summary
 }
 
-fn print_pid_stats(
-    pid_summaries: &PidSummaries,
-    all_active_time: f32,
-    all_time: f32,
-    count_to_print: usize,
-    sort_by: SortBy,
-) {
-    let count = {
-        if count_to_print > pid_summaries.len() {
-            pid_summaries.len()
-        } else {
-            count_to_print
-        }
-    };
+fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: SortBy) {
+    if count > session_summary.len() {
+        count = session_summary.len()
+    }
 
-    for (pid, summary) in sort_pid_summaries(&pid_summaries, sort_by)
+    for (pid, pid_summary) in session_summary
+        .to_sorted_summaries(sort_by)
         .iter()
         .take(count)
     {
-        if summary.syscall_count == 0 {
+        if pid_summary.syscall_count == 0 {
             continue;
-        };
-
-        let perc_active_time = summary.active_time / all_active_time * 100.0;
-        let perc_total_time = summary.total_time / all_time * 100.0;
-
-        println!(
-                "PID {0} - {1} syscalls, active {2:.3}ms, total {3:.3}ms, active {4:.2}%, total {5:.2}%\n",
-                pid, summary.syscall_count, summary.active_time, summary.total_time, perc_active_time, perc_total_time
-            );
-        println!(
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
-            "syscall", "count", "total", "max", "avg", "min", "errors"
-        );
-        println!(
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
-            "", "", "(ms)", "(ms)", "(ms)", "(ms)", ""
-        );
-        println!(
-            "  ---------------\t--------\t----------\t----------\t----------\t----------\t--------"
-        );
-        for s in &summary.syscall_stats {
-            print!(
-                "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}",
-                s.name, s.count, s.total, s.max, s.avg, s.min
-            );
-            if !s.errors.is_empty() {
-                for (err, count) in &s.errors {
-                    print!("\t{}: {}", err, count);
-                }
-            }
-            println!("");
         }
+
+        println!("PID {}", pid);
+        println!("{}", pid_summary);
         println!("  ---------------\n");
 
-        if !summary.files.is_empty() {
+        if !pid_summary.files.is_empty() {
             println!("Files opened:");
-            if summary.files.len() > 5 {
-                for f in summary.files.iter().take(5) {
+            if pid_summary.files.len() > PRINT_FILE_COUNT {
+                for f in pid_summary.files.iter().take(PRINT_FILE_COUNT) {
                     println!("{}", f);
                 }
-                println!("And {} more...", summary.files.len() - 5);
+                println!("And {} more...", pid_summary.files.len() - PRINT_FILE_COUNT);
             } else {
-                for f in summary.files.iter() {
+                for f in pid_summary.files.iter() {
                     println!("{}", f);
                 }
             }
-            println!("");
-        } else {
-            println!("");
         }
+        println!("");
     }
 }
 
-fn print_pid_summaries(
-    pid_summaries: &PidSummaries,
-    all_active_time: f32,
-    count_to_print: usize,
+fn print_session_summary(
+    session_summary: &SessionSummary,
+    elapsed_time: Option<Duration>,
+    mut count: usize,
     sort_by: SortBy,
 ) {
-    let count = {
-        if count_to_print > pid_summaries.len() {
-            pid_summaries.len()
-        } else {
-            count_to_print
-        }
-    };
+    if count > session_summary.len() {
+        count = session_summary.len()
+    }
 
     println!("Top {} PIDs\n-----------\n", count);
 
@@ -580,93 +626,52 @@ fn print_pid_summaries(
     );
     println!("  ----------\t----------\t---------\t---------\t---------\t---------");
 
-    for (pid, summary) in sort_pid_summaries(&pid_summaries, sort_by)
+    for (pid, pid_summary) in session_summary
+        .to_sorted_summaries(sort_by)
         .iter()
         .take(count)
     {
         println!(
             "  {0: <10}\t{1: >10.3}\t{2: >10.3}\t{3: >10.3}\t{4: >8.2}%\t{5: >9}",
             pid,
-            summary.active_time,
-            summary.wait_time,
-            summary.total_time,
-            summary.active_time / all_active_time * 100.0,
-            summary.syscall_count
+            pid_summary.active_time,
+            pid_summary.wait_time,
+            pid_summary.total_time,
+            pid_summary.active_time / session_summary.all_active_time * 100.0,
+            pid_summary.syscall_count
         );
     }
     println!("");
-}
-
-fn sort_pid_summaries<'a>(
-    pid_summaries: &PidSummaries<'a>,
-    sort_by: SortBy,
-) -> Vec<(Pid, PidSummary<'a>)> {
-    let mut sorted_summaries: Vec<_> = pid_summaries
-        .par_iter()
-        .map(|(pid, summary)| (*pid, (*summary).clone()))
-        .collect();
-
-    match sort_by {
-        SortBy::ActiveTime => {
-            sorted_summaries
-                .par_sort_by(|(_, x), (_, y)| (y.active_time).partial_cmp(&x.active_time).unwrap());
-        }
-        SortBy::Pid => {
-            sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
-        }
-        SortBy::TotalTime => {
-            sorted_summaries
-                .par_sort_by(|(_, x), (_, y)| (y.total_time).partial_cmp(&x.total_time).unwrap());
-        }
+    println!("Total PIDs: {}", session_summary.len());
+    println!("System Time: {0:.6}s", session_summary.all_time / 1000.0);
+    if let Some(real_time) = elapsed_time {
+        println!(
+            "Real Time: {}.{}s",
+            real_time.num_seconds(),
+            real_time.num_milliseconds()
+        );
     }
-
-    sorted_summaries
 }
 
-fn print_pid_details(pid_summaries: &PidSummaries, pid_to_print: Pid) {
-    if let Some(summary) = pid_summaries.get(&pid_to_print) {
-        println!(
-            "PID {0} - {1} syscalls, active {2:.3}ms, total {3:.3}ms",
-            pid_to_print, summary.syscall_count, summary.active_time, summary.total_time,
-        );
-        println!(
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
-            "syscall", "count", "total", "max", "avg", "min", "errors"
-        );
-        println!(
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
-            "", "", "(ms)", "(ms)", "(ms)", "(ms)", ""
-        );
-        println!(
-            "  ---------------\t--------\t----------\t----------\t----------\t----------\t--------"
-        );
-        for s in &summary.syscall_stats {
-            print!(
-                "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}",
-                s.name, s.count, s.total, s.max, s.avg, s.min
-            );
-            if !s.errors.is_empty() {
-                for (err, count) in &s.errors {
-                    print!("\t{}: {}", err, count);
-                }
-            }
-            println!("");
-        }
+fn print_pid_details(session_summary: &SessionSummary, pid: Pid) {
+    if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
+        println!("PID {}", pid);
+        println!("{}", pid_summary);
         println!("  ---------------\n");
 
-        if !summary.files.is_empty() {
-            println!("{} files opened:", summary.files.len());
-            for f in summary.files.iter() {
+        if !pid_summary.files.is_empty() {
+            println!("{} files opened:", pid_summary.files.len());
+            for f in pid_summary.files.iter() {
                 println!("{}", f);
             }
             println!("");
         }
     } else {
-        println!("PID {} not found", pid_to_print);
+        println!("PID {} not found", pid);
     }
 }
 
-fn print_wall_clock_time(buffer: &str) {
+fn parse_elapsed_real_time(buffer: &str) -> Option<chrono::Duration> {
     let start_line = buffer.lines().next().unwrap();
     let start_time_cap = TIME_RE
         .captures(start_line)
@@ -680,17 +685,10 @@ fn print_wall_clock_time(buffer: &str) {
             let start_time = NaiveTime::parse_from_str(start.as_str(), "%H:%M:%S%.6f");
             let end_time = NaiveTime::parse_from_str(end.as_str(), "%H:%M:%S%.6f");
             match (start_time, end_time) {
-                (Ok(start), Ok(end)) => {
-                    let wall_clock_time = end - start;
-                    println!(
-                        "Real Time: {}.{}s",
-                        wall_clock_time.num_seconds(),
-                        wall_clock_time.num_milliseconds()
-                    );
-                }
-                _ => {}
+                (Ok(start), Ok(end)) => Some(end - start),
+                _ => None,
             }
         }
-        _ => {}
+        _ => None,
     }
 }
