@@ -1,11 +1,13 @@
 extern crate clap;
 #[macro_use]
 extern crate lazy_static;
+extern crate petgraph;
 extern crate rayon;
 extern crate regex;
 
 use chrono::{Duration, NaiveTime};
 use clap::{App, Arg};
+use petgraph::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -21,6 +23,7 @@ struct RawData<'a> {
     length: Option<f32>,
     error: Option<&'a str>,
     file: Option<&'a str>,
+    child_pid: Option<Pid>,
 }
 
 impl<'a> RawData<'a> {
@@ -30,29 +33,47 @@ impl<'a> RawData<'a> {
         length_str: Option<&'a str>,
         error: Option<&'a str>,
         file: Option<&'a str>,
+        child_pid_str: Option<&'a str>,
     ) -> Option<RawData<'a>> {
-        if let Some(length) = length_str {
-            match (pid_str.parse::<Pid>(), length.parse::<f32>()) {
+        match (length_str, child_pid_str) {
+            (Some(length), Some(child_pid)) => match (
+                pid_str.parse::<Pid>(),
+                length.parse::<f32>(),
+                child_pid.parse::<Pid>(),
+            ) {
+                (Ok(pid), Ok(length), Ok(child_pid)) => Some(RawData {
+                    pid,
+                    syscall,
+                    length: Some(length),
+                    error,
+                    file,
+                    child_pid: Some(child_pid),
+                }),
+                _ => None,
+            },
+            (Some(length), None) => match (pid_str.parse::<Pid>(), length.parse::<f32>()) {
                 (Ok(pid), Ok(length)) => Some(RawData {
                     pid,
                     syscall,
                     length: Some(length),
                     error,
                     file,
+                    child_pid: None,
                 }),
                 _ => None,
-            }
-        } else {
-            match pid_str.parse::<Pid>() {
+            },
+            (None, None) => match pid_str.parse::<Pid>() {
                 (Ok(pid)) => Some(RawData {
                     pid,
                     syscall,
                     length: None,
                     error,
                     file,
+                    child_pid: None,
                 }),
                 _ => None,
-            }
+            },
+            _ => None,
         }
     }
 }
@@ -123,6 +144,7 @@ impl<'a> fmt::Display for SyscallStats<'a> {
 struct PidData<'a> {
     syscall_data: HashMap<&'a str, SyscallData<'a>>,
     files: BTreeSet<&'a str>,
+    child_pids: Vec<Pid>,
 }
 
 impl<'a> PidData<'a> {
@@ -130,6 +152,7 @@ impl<'a> PidData<'a> {
         PidData {
             syscall_data: HashMap::new(),
             files: BTreeSet::new(),
+            child_pids: Vec::new(),
         }
     }
 }
@@ -142,6 +165,7 @@ struct PidSummary<'a> {
     total_time: f32,
     syscall_stats: Vec<SyscallStats<'a>>,
     files: BTreeSet<&'a str>,
+    child_pids: Vec<Pid>,
 }
 
 impl<'a> fmt::Display for PidSummary<'a> {
@@ -175,6 +199,7 @@ impl<'a> fmt::Display for PidSummary<'a> {
 
 struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
+    pid_graph: GraphMap<Pid, i32, Directed>,
     all_time: f32,
     all_active_time: f32,
 }
@@ -183,6 +208,7 @@ impl<'a> SessionSummary<'a> {
     fn new() -> SessionSummary<'a> {
         SessionSummary {
             pid_summaries: HashMap::new(),
+            pid_graph: DiGraphMap::new(),
             all_time: 0.0,
             all_active_time: 0.0,
         }
@@ -242,7 +268,7 @@ lazy_static! {
         r#"(?x)
         ^(?P<pid>\d+)[^a-zA-Z]+
         (?P<syscall>\w+)(:?\("(?P<file>[^"]+)")?
-        ([^)]+<unfinished\s[.]{3}>$|[^)]+\)\s+=\s+(-)?\d+(<[^>]+>)?
+        ([^)]+<unfinished\s[.]{3}>$|[^)]+\)\s+=\s+(?P<return_code>(-)?\d+)(:?<[^>]+>)?
         \s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
         <(?P<length>\d+\.\d+)?>$)
     "#
@@ -382,6 +408,8 @@ fn main() {
         Print::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
         Print::Pid(pid_to_print) => print_pid_details(&session_summary, pid_to_print),
     }
+
+    build_pid_graph(&session_summary);
 }
 
 fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
@@ -404,6 +432,7 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
                             Some(length.as_str()),
                             Some(error.as_str()),
                             Some(file.as_str()),
+                            None,
                         ),
                         (Some(pid), Some(length), None, Some(file)) => RawData::from_strs(
                             pid.as_str(),
@@ -411,11 +440,13 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
                             Some(length.as_str()),
                             None,
                             Some(file.as_str()),
+                            None,
                         ),
                         (Some(pid), Some(length), None, None) => RawData::from_strs(
                             pid.as_str(),
                             syscall,
                             Some(length.as_str()),
+                            None,
                             None,
                             None,
                         ),
@@ -425,6 +456,40 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
                             None,
                             None,
                             Some(file.as_str()),
+                            None,
+                        ),
+                        _ => None,
+                    }
+                } else if syscall == "clone" {
+                    match (
+                        caps.name("pid"),
+                        caps.name("length"),
+                        caps.name("error_code"),
+                        caps.name("return_code"),
+                    ) {
+                        (Some(pid), Some(length), None, Some(return_code)) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            Some(length.as_str()),
+                            None,
+                            None,
+                            Some(return_code.as_str()),
+                        ),
+                        (Some(pid), Some(length), Some(error), None) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            Some(length.as_str()),
+                            Some(error.as_str()),
+                            None,
+                            None,
+                        ),
+                        (Some(pid), Some(length), None, None) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            Some(length.as_str()),
+                            None,
+                            None,
+                            None,
                         ),
                         _ => None,
                     }
@@ -440,11 +505,13 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
                             Some(length.as_str()),
                             Some(error.as_str()),
                             None,
+                            None,
                         ),
                         (Some(pid), Some(length), None) => RawData::from_strs(
                             pid.as_str(),
                             syscall,
                             Some(length.as_str()),
+                            None,
                             None,
                             None,
                         ),
@@ -476,6 +543,10 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
 
             if let Some(file) = data.file {
                 pid_entry.files.insert(file);
+            }
+
+            if let Some(child_pid) = data.child_pid {
+                pid_entry.child_pids.push(child_pid);
             }
         }
     }
@@ -585,6 +656,7 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
                 total_time,
                 syscall_stats,
                 files: syscall_data[&pid].files.clone(),
+                child_pids: syscall_data[&pid].child_pids.clone(),
             },
         );
     }
@@ -601,42 +673,23 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
         .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.active_time)
         .sum();
 
+    session_summary.pid_graph = build_pid_graph(&session_summary);
+
     session_summary
 }
 
-fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: SortBy) {
-    if count > session_summary.len() {
-        count = session_summary.len()
-    }
+fn build_pid_graph(session: &SessionSummary) -> GraphMap<Pid, i32, Directed> {
+    let mut pid_graph = DiGraphMap::new();
 
-    for (pid, pid_summary) in session_summary
-        .to_sorted_summaries(sort_by)
-        .iter()
-        .take(count)
-    {
-        if pid_summary.syscall_count == 0 {
-            continue;
-        }
-
-        println!("PID {}", pid);
-        println!("{}", pid_summary);
-        println!("  ---------------\n");
-
-        if !pid_summary.files.is_empty() {
-            println!("Files opened:");
-            if pid_summary.files.len() > PRINT_FILE_COUNT {
-                for f in pid_summary.files.iter().take(PRINT_FILE_COUNT) {
-                    println!("{}", f);
-                }
-                println!("And {} more...", pid_summary.files.len() - PRINT_FILE_COUNT);
-            } else {
-                for f in pid_summary.files.iter() {
-                    println!("{}", f);
-                }
+    for (pid, pid_summary) in &session.pid_summaries {
+        if !pid_summary.child_pids.is_empty() {
+            for child in &pid_summary.child_pids {
+                pid_graph.add_edge(*pid, *child, 1);
             }
         }
-        println!("");
     }
+
+    pid_graph
 }
 
 fn print_session_summary(
@@ -649,6 +702,7 @@ fn print_session_summary(
         count = session_summary.len()
     }
 
+    println!("");
     println!("Top {} PIDs\n-----------\n", count);
 
     println!(
@@ -684,19 +738,130 @@ fn print_session_summary(
     }
 }
 
+fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: SortBy) {
+    if count > session_summary.len() {
+        count = session_summary.len()
+    }
+
+    println!("");
+
+    for (pid, pid_summary) in session_summary
+        .to_sorted_summaries(sort_by)
+        .iter()
+        .take(count)
+    {
+        if pid_summary.syscall_count == 0 {
+            continue;
+        }
+
+        println!("PID {}", pid);
+        print!("{}", pid_summary);
+        println!("  ---------------\n");
+
+        let parent = session_summary
+            .pid_graph
+            .neighbors_directed(*pid, Incoming)
+            .peekable();
+
+        for p in parent {
+            println!("Parent PID: {}", p);
+        }
+
+        if pid_summary.child_pids.is_empty() {
+            println!("");
+        } else {
+            let mut children = session_summary
+                .pid_graph
+                .neighbors_directed(*pid, Outgoing)
+                .enumerate()
+                .peekable();
+
+            print!("Child PIDs:  ");
+            if pid_summary.child_pids.len() > 10 {
+                for (i, p) in children.take(10) {
+                    if i != 9 {
+                        print!("{}, ", p);
+                    } else {
+                        println!("{}", p);
+                    }
+                }
+                println!("And {} more...", pid_summary.child_pids.len() - 10);
+            } else {
+                while let Some((i, n)) = children.next() {
+                    if i % 10 == 0 && i != 0 {
+                        println!("");
+                    }
+                    if let Some(_) = children.peek() {
+                        print!("{}, ", n);
+                    } else {
+                        print!("{}", n);
+                    }
+                }
+            }
+            println!("\n");
+        }
+
+        if !pid_summary.files.is_empty() {
+            println!("Files opened:");
+            if pid_summary.files.len() > PRINT_FILE_COUNT {
+                for f in pid_summary.files.iter().take(PRINT_FILE_COUNT) {
+                    println!("{}", f);
+                }
+                println!("And {} more...", pid_summary.files.len() - PRINT_FILE_COUNT);
+            } else {
+                for f in pid_summary.files.iter() {
+                    println!("{}", f);
+                }
+            }
+        }
+        println!("\n");
+    }
+}
+
 fn print_pid_details(session_summary: &SessionSummary, pid: Pid) {
     if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
+        println!("");
         println!("PID {}", pid);
-        println!("{}", pid_summary);
+        print!("{}", pid_summary);
         println!("  ---------------\n");
+
+        let parent = session_summary
+            .pid_graph
+            .neighbors_directed(pid, Incoming)
+            .peekable();
+        for p in parent {
+            println!("Parent PID: {}", p);
+        }
+
+        if !pid_summary.child_pids.is_empty() {
+            let mut children = session_summary
+                .pid_graph
+                .neighbors_directed(pid, Outgoing)
+                .enumerate()
+                .peekable();
+
+            print!("{} Child PIDs:  ", pid_summary.child_pids.len());
+            while let Some((i, n)) = children.next() {
+                if i % 10 == 0 {
+                    println!("");
+                }
+                if let Some(_) = children.peek() {
+                    print!("{}, ", n);
+                } else {
+                    print!("{}", n);
+                }
+            }
+            println!("");
+        }
 
         if !pid_summary.files.is_empty() {
             println!("{} files opened:", pid_summary.files.len());
             for f in pid_summary.files.iter() {
                 println!("{}", f);
             }
-            println!("");
         }
+
+        println!("");
     } else {
         println!("PID {} not found", pid);
     }
