@@ -18,7 +18,7 @@ type Pid = i32;
 struct RawData<'a> {
     pid: Pid,
     syscall: &'a str,
-    length: f32,
+    length: Option<f32>,
     error: Option<&'a str>,
     file: Option<&'a str>,
 }
@@ -27,22 +27,36 @@ impl<'a> RawData<'a> {
     fn from_strs(
         pid_str: &'a str,
         syscall: &'a str,
-        length_str: &'a str,
+        length_str: Option<&'a str>,
         error: Option<&'a str>,
         file: Option<&'a str>,
     ) -> Option<RawData<'a>> {
-        match (pid_str.parse::<Pid>(), length_str.parse::<f32>()) {
-            (Ok(pid), Ok(length)) => Some(RawData {
-                pid,
-                syscall,
-                length,
-                error,
-                file,
-            }),
-            _ => None,
+        if let Some(length) = length_str {
+            match (pid_str.parse::<Pid>(), length.parse::<f32>()) {
+                (Ok(pid), Ok(length)) => Some(RawData {
+                    pid,
+                    syscall,
+                    length: Some(length),
+                    error,
+                    file,
+                }),
+                _ => None,
+            }
+        } else {
+            match pid_str.parse::<Pid>() {
+                (Ok(pid)) => Some(RawData {
+                    pid,
+                    syscall,
+                    length: None,
+                    error,
+                    file,
+                }),
+                _ => None,
+            }
         }
     }
 }
+
 struct SyscallData<'a> {
     lengths: Vec<f32>,
     errors: BTreeMap<&'a str, Pid>,
@@ -227,9 +241,10 @@ lazy_static! {
     static ref ALL_RE: Regex = Regex::new(
         r#"(?x)
         ^(?P<pid>\d+)[^a-zA-Z]+
-        (?P<syscall>\w+)(:?\(:?"(?P<file>[^"]+)")?[^)]+\)\s+
-        =\s+(-)?\d+(<[^>]+>)?\s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
-        <(?P<length>\d+\.\d+)?>$
+        (?P<syscall>\w+)(:?\("(?P<file>[^"]+)")?
+        ([^)]+<unfinished\s[.]{3}>$|[^)]+\)\s+=\s+(-)?\d+(<[^>]+>)?
+        \s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
+        <(?P<length>\d+\.\d+)?>$)
     "#
     )
     .unwrap();
@@ -373,62 +388,71 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
     let parsed_data: Vec<_> = buffer
         .par_lines()
         .filter_map(|line| ALL_RE.captures(line))
-        .map(|caps| {
-            match (
-                caps.name("pid"),
-                caps.name("syscall"),
-                caps.name("length"),
-                caps.name("error_code"),
-                caps.name("file"),
-            ) {
-                (Some(pid), Some(syscall), Some(length), Some(error), Some(file)) => {
-                    match syscall.as_str() {
-                        "open" => RawData::from_strs(
+        .map(|caps| match caps.name("syscall") {
+            Some(s) => {
+                let syscall = s.as_str();
+                if syscall == "open" {
+                    match (
+                        caps.name("pid"),
+                        caps.name("length"),
+                        caps.name("error_code"),
+                        caps.name("file"),
+                    ) {
+                        (Some(pid), Some(length), Some(error), Some(file)) => RawData::from_strs(
                             pid.as_str(),
-                            syscall.as_str(),
-                            length.as_str(),
+                            syscall,
+                            Some(length.as_str()),
                             Some(error.as_str()),
                             Some(file.as_str()),
                         ),
-                        _ => RawData::from_strs(
+                        (Some(pid), Some(length), None, Some(file)) => RawData::from_strs(
                             pid.as_str(),
-                            syscall.as_str(),
-                            length.as_str(),
-                            Some(error.as_str()),
-                            None,
-                        ),
-                    }
-                }
-                (Some(pid), Some(syscall), Some(length), Some(error), None) => RawData::from_strs(
-                    pid.as_str(),
-                    syscall.as_str(),
-                    length.as_str(),
-                    Some(error.as_str()),
-                    None,
-                ),
-                (Some(pid), Some(syscall), Some(length), None, Some(file)) => {
-                    match syscall.as_str() {
-                        "open" => RawData::from_strs(
-                            pid.as_str(),
-                            syscall.as_str(),
-                            length.as_str(),
+                            syscall,
+                            Some(length.as_str()),
                             None,
                             Some(file.as_str()),
                         ),
-                        _ => RawData::from_strs(
+                        (Some(pid), Some(length), None, None) => RawData::from_strs(
                             pid.as_str(),
-                            syscall.as_str(),
-                            length.as_str(),
+                            syscall,
+                            Some(length.as_str()),
                             None,
                             None,
                         ),
+                        (Some(pid), None, None, Some(file)) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            None,
+                            None,
+                            Some(file.as_str()),
+                        ),
+                        _ => None,
+                    }
+                } else {
+                    match (
+                        caps.name("pid"),
+                        caps.name("length"),
+                        caps.name("error_code"),
+                    ) {
+                        (Some(pid), Some(length), Some(error)) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            Some(length.as_str()),
+                            Some(error.as_str()),
+                            None,
+                        ),
+                        (Some(pid), Some(length), None) => RawData::from_strs(
+                            pid.as_str(),
+                            syscall,
+                            Some(length.as_str()),
+                            None,
+                            None,
+                        ),
+                        _ => None,
                     }
                 }
-                (Some(pid), Some(syscall), Some(length), None, None) => {
-                    RawData::from_strs(pid.as_str(), syscall.as_str(), length.as_str(), None, None)
-                }
-                _ => None,
             }
+            None => None,
         })
         .collect();
 
@@ -441,7 +465,10 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
                 .entry(data.syscall)
                 .or_insert(SyscallData::new());
 
-            syscall_entry.lengths.push(data.length);
+            if let Some(length) = data.length {
+                syscall_entry.lengths.push(length);
+            }
+
             if let Some(error) = data.error {
                 let error_entry = syscall_entry.errors.entry(error).or_insert(0);
                 *error_entry += 1;
@@ -475,7 +502,7 @@ fn build_syscall_stats<'a>(
                         x.partial_cmp(y)
                             .expect("Invalid comparison when finding max length")
                     })
-                    .unwrap()
+                    .unwrap_or(&(0.0))
                     * 1000.0;
                 let min = raw_data
                     .lengths
@@ -484,9 +511,13 @@ fn build_syscall_stats<'a>(
                         x.partial_cmp(y)
                             .expect("Invalid comparison when finding min length")
                     })
-                    .unwrap()
+                    .unwrap_or(&(0.0))
                     * 1000.0;
-                let avg = total / raw_data.lengths.len() as f32;
+                let avg = if raw_data.lengths.len() > 0 {
+                    total / raw_data.lengths.len() as f32
+                } else {
+                    0.0
+                };
                 let errors = raw_data.errors.clone();
 
                 SyscallStats::new(
