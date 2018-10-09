@@ -168,6 +168,7 @@ struct PidSummary<'a> {
     total_time: f32,
     syscall_stats: Vec<SyscallStats<'a>>,
     files: BTreeSet<&'a str>,
+    parent_pid: Option<Pid>,
     child_pids: Vec<Pid>,
 }
 
@@ -202,7 +203,6 @@ impl<'a> fmt::Display for PidSummary<'a> {
 
 struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
-    pid_graph: GraphMap<Pid, i32, Directed>,
     all_time: f32,
     all_active_time: f32,
 }
@@ -211,7 +211,6 @@ impl<'a> SessionSummary<'a> {
     fn new() -> SessionSummary<'a> {
         SessionSummary {
             pid_summaries: HashMap::new(),
-            pid_graph: DiGraphMap::new(),
             all_time: 0.0,
             all_active_time: 0.0,
         }
@@ -239,6 +238,10 @@ impl<'a> SessionSummary<'a> {
             SortBy::Pid => {
                 sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
             }
+            SortBy::SyscallCount => {
+                sorted_summaries
+                    .par_sort_by(|(_, x), (_, y)| (y.syscall_count).cmp(&x.syscall_count));
+            }
             SortBy::TotalTime => {
                 sorted_summaries.par_sort_by(|(_, x), (_, y)| {
                     (y.total_time)
@@ -255,13 +258,19 @@ impl<'a> SessionSummary<'a> {
 enum SortBy {
     ActiveTime,
     Pid,
+    SyscallCount,
     TotalTime,
 }
 
 enum Print {
     Top,
     Stats,
-    Pid,
+    Pid(PrintRelatedPids),
+}
+
+enum PrintRelatedPids {
+    Related,
+    One,
 }
 
 static PRINT_FILE_COUNT: usize = 5;
@@ -270,8 +279,8 @@ lazy_static! {
     static ref ALL_RE: Regex = Regex::new(
         r##"(?x)
         ^(?P<pid>\d+)[^a-zA-Z]+
-        (?P<syscall>\w+)(:?\("(?P<file>[^"]+)")?
-        ([^)]+<unfinished\s[.]{3}>$|.+\)\s+=\s+(?P<return_code>(-)?\d+)(:?<[^>]+>)?
+        (?P<syscall>\w+)(:?\((:?[A-Z_]+,\s)?"(?P<file>[^"]+)")?
+        ([^)]+<unfinished\s[.]{3}>$|.+\)\s+=\s+(?P<return_code>(-)?[\d?]+)(:?<[^>]+>)?
         \s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
         <(?P<length>\d+\.\d+)?>$)
     "##
@@ -303,11 +312,17 @@ fn main() {
         .author("Will Chandler <wchandler@gitlab.com")
         .about("Summarizes raw strace output")
         .arg(
+            Arg::with_name("top")
+                .short("t")
+                .long("top")
+                .help("Prints a summary top <COUNT> PIDs, as determined by <SORT>. Default output"),
+        )
+        .arg(
             Arg::with_name("stats")
                 .short("s")
                 .long("stats")
-                .help("Prints a breakdown of syscall stats for COUNT PIDs")
-                .display_order(1),
+                .help("Prints a breakdown of syscall stats for <COUNT> PIDs")
+                .conflicts_with("top"),
         )
         .arg(
             Arg::with_name("pid")
@@ -318,14 +333,24 @@ fn main() {
                 .help("Print details of one or more specific PIDs")
                 .takes_value(true)
                 .multiple(true)
-                .conflicts_with("summary"),
+                .conflicts_with("top")
+                .conflicts_with("stats"),
+        )
+        .arg(
+            Arg::with_name("related")
+                .short("r")
+                .long("related")
+                .help("With `--pid`, will print details of parent and child PIDs of <PID>")
+                .conflicts_with("top")
+                .conflicts_with("stats")
+                .requires("pid"),
         )
         .arg(
             Arg::with_name("count")
                 .short("c")
                 .long("count")
                 .value_name("COUNT")
-                .default_value_if("top", None, "25")
+                .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
                 .help("The number of PIDs to print")
                 .validator(validate_count)
                 .takes_value(true),
@@ -334,7 +359,7 @@ fn main() {
             Arg::with_name("sort_by")
                 .short("S")
                 .long("sort")
-                .possible_values(&["active_time", "pid", "total_time"])
+                .possible_values(&["active_time", "pid", "syscall_count", "total_time"])
                 .default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
                 .help("Field to sort results by"),
@@ -369,16 +394,19 @@ fn main() {
         matches.is_present("top"),
         matches.is_present("stats"),
         matches.is_present("pid"),
+        matches.is_present("related"),
     ) {
-        (true, _, _) => Print::Top,
-        (_, true, _) => Print::Stats,
-        (_, _, true) => Print::Pid,
+        (true, _, _, _) => Print::Top,
+        (_, true, _, _) => Print::Stats,
+        (_, _, true, true) => Print::Pid(PrintRelatedPids::Related),
+        (_, _, true, false) => Print::Pid(PrintRelatedPids::One),
         _ => Print::Top,
     };
 
     let sort_by = match matches.value_of("sort_by") {
         Some("active_time") => SortBy::ActiveTime,
         Some("pid") => SortBy::Pid,
+        Some("syscall_count") => SortBy::SyscallCount,
         Some("total_time") => SortBy::TotalTime,
         _ => SortBy::ActiveTime,
     };
@@ -414,7 +442,7 @@ fn main() {
             print_session_summary(&session_summary, elapsed_time, count_to_print, sort_by)
         }
         Print::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
-        Print::Pid => print_pid_details(&session_summary, &pids_to_print),
+        Print::Pid(related) => print_pid_details(&session_summary, &pids_to_print, related),
     }
 
     build_pid_graph(&session_summary);
@@ -427,7 +455,7 @@ fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
         .map(|caps| match caps.name("syscall") {
             Some(s) => {
                 let syscall = s.as_str();
-                if syscall == "open" {
+                if syscall == "open" || syscall == "openat" {
                     match (
                         caps.name("pid"),
                         caps.name("length"),
@@ -636,8 +664,8 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
         let active_time = syscall_stats
             .par_iter()
             .filter(|stat| match stat.name.as_ref() {
-                "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
-                | "select" | "wait4" => false,
+                "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
+                | "restart_syscall" | "poll" | "ppoll" | "pselect" | "select" | "wait4" => false,
                 _ => true,
             })
             .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
@@ -646,8 +674,8 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
         let wait_time = syscall_stats
             .par_iter()
             .filter(|stat| match stat.name.as_ref() {
-                "epoll_wait" | "futex" | "nanosleep" | "restart_syscall" | "poll" | "ppoll"
-                | "select" | "wait4" => true,
+                "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
+                | "restart_syscall" | "poll" | "ppoll" | "pselect" | "select" | "wait4" => true,
                 _ => false,
             })
             .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
@@ -664,6 +692,7 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
                 total_time,
                 syscall_stats,
                 files: syscall_data[&pid].files.clone(),
+                parent_pid: None,
                 child_pids: syscall_data[&pid].child_pids.clone(),
             },
         );
@@ -681,7 +710,19 @@ fn build_session_summary<'a>(syscall_data: &HashMap<Pid, PidData<'a>>) -> Sessio
         .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.active_time)
         .sum();
 
-    session_summary.pid_graph = build_pid_graph(&session_summary);
+    let pid_graph = build_pid_graph(&session_summary);
+
+    for (pid, pid_summary) in session_summary.pid_summaries.iter_mut() {
+        let mut parent_graph = pid_graph.neighbors_directed(*pid, Incoming);
+
+        if let Some(parent) = parent_graph.next() {
+            pid_summary.parent_pid = Some(parent);
+        }
+
+        for p in parent_graph {
+            println!("Parent PID: {}", p);
+        }
+    }
 
     session_summary
 }
@@ -715,7 +756,7 @@ fn print_session_summary(
 
     println!(
         "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
-        "pid", "active (ms)", "wait (ms)", "total (ms)", "% active", "calls"
+        "pid", "active (ms)", "wait (ms)", "total (ms)", "% active", "syscalls"
     );
     println!("  ----------\t----------\t---------\t---------\t---------\t---------");
 
@@ -766,27 +807,16 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
         print!("{}", pid_summary);
         println!("  ---------------\n");
 
-        let parent = session_summary
-            .pid_graph
-            .neighbors_directed(*pid, Incoming)
-            .peekable();
-
-        for p in parent {
+        if let Some(p) = pid_summary.parent_pid {
             println!("Parent PID: {}", p);
         }
 
         if pid_summary.child_pids.is_empty() {
             println!("");
         } else {
-            let mut children = session_summary
-                .pid_graph
-                .neighbors_directed(*pid, Outgoing)
-                .enumerate()
-                .peekable();
-
             print!("Child PIDs:  ");
             if pid_summary.child_pids.len() > 10 {
-                for (i, p) in children.take(10) {
+                for (i, p) in pid_summary.child_pids.iter().enumerate().take(10) {
                     if i != 9 {
                         print!("{}, ", p);
                     } else {
@@ -795,11 +825,12 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
                 }
                 println!("And {} more...", pid_summary.child_pids.len() - 10);
             } else {
-                while let Some((i, n)) = children.next() {
+                let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
+                while let Some((i, n)) = child_pid_iter.next() {
                     if i % 10 == 0 && i != 0 {
                         println!("");
                     }
-                    if let Some(_) = children.peek() {
+                    if let Some(_) = child_pid_iter.peek() {
                         print!("{}, ", n);
                     } else {
                         print!("{}", n);
@@ -826,41 +857,59 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
     }
 }
 
-fn print_pid_details(session_summary: &SessionSummary, pids: &Vec<Pid>) {
-    for pid in pids {
+fn print_pid_details(
+    session_summary: &SessionSummary,
+    pids: &Vec<Pid>,
+    print_related: PrintRelatedPids,
+) {
+    let mut pids_to_print = BTreeSet::new();
+
+    if let PrintRelatedPids::Related = print_related {
+        for pid in pids {
+            if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
+                pids_to_print.insert(*pid);
+
+                if let Some(parent) = pid_summary.parent_pid {
+                    pids_to_print.insert(parent);
+                }
+
+                for child in &pid_summary.child_pids {
+                    pids_to_print.insert(*child);
+                }
+            }
+        }
+    } else {
+        pids_to_print.extend(pids);
+    };
+
+    for pid in pids_to_print {
         if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
             println!("");
             println!("PID {}", pid);
             print!("{}", pid_summary);
             println!("  ---------------\n");
 
-            let parent = session_summary
-                .pid_graph
-                .neighbors_directed(*pid, Incoming)
-                .peekable();
-            for p in parent {
+            if let Some(p) = pid_summary.parent_pid {
                 println!("Parent PID: {}", p);
             }
 
             if !pid_summary.child_pids.is_empty() {
-                let mut children = session_summary
-                    .pid_graph
-                    .neighbors_directed(*pid, Outgoing)
-                    .enumerate()
-                    .peekable();
+                print!("Child PIDs:  ");
 
-                print!("{} Child PIDs:  ", pid_summary.child_pids.len());
-                while let Some((i, n)) = children.next() {
-                    if i % 10 == 0 {
+                let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
+                while let Some((i, n)) = child_pid_iter.next() {
+                    if i % 10 == 0 && i != 0 {
                         println!("");
                     }
-                    if let Some(_) = children.peek() {
+                    if let Some(_) = child_pid_iter.peek() {
                         print!("{}, ", n);
                     } else {
                         print!("{}", n);
                     }
                 }
                 println!("\n");
+            } else {
+                println!("");
             }
 
             if !pid_summary.files.is_empty() {
