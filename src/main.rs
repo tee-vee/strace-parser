@@ -17,6 +17,7 @@ use std::io::prelude::*;
 
 type Pid = i32;
 
+#[derive(Debug, PartialEq)]
 struct RawData<'a> {
     pid: Pid,
     syscall: &'a str,
@@ -78,6 +79,7 @@ impl<'a> RawData<'a> {
     }
 }
 
+#[derive(Debug)]
 struct SyscallData<'a> {
     lengths: Vec<f32>,
     errors: BTreeMap<&'a str, Pid>,
@@ -141,6 +143,7 @@ impl<'a> fmt::Display for SyscallStats<'a> {
     }
 }
 
+#[derive(Debug)]
 struct PidData<'a> {
     syscall_data: HashMap<&'a str, SyscallData<'a>>,
     files: BTreeSet<&'a str>,
@@ -258,20 +261,20 @@ enum SortBy {
 enum Print {
     Top,
     Stats,
-    Pid(Pid),
+    Pid,
 }
 
 static PRINT_FILE_COUNT: usize = 5;
 
 lazy_static! {
     static ref ALL_RE: Regex = Regex::new(
-        r#"(?x)
+        r##"(?x)
         ^(?P<pid>\d+)[^a-zA-Z]+
         (?P<syscall>\w+)(:?\("(?P<file>[^"]+)")?
-        ([^)]+<unfinished\s[.]{3}>$|[^)]+\)\s+=\s+(?P<return_code>(-)?\d+)(:?<[^>]+>)?
+        ([^)]+<unfinished\s[.]{3}>$|.+\)\s+=\s+(?P<return_code>(-)?\d+)(:?<[^>]+>)?
         \s+(:?(?P<error_code>E[A-Z]+)\s\([^)]+\)\s+)?
         <(?P<length>\d+\.\d+)?>$)
-    "#
+    "##
     )
     .unwrap();
 }
@@ -312,8 +315,9 @@ fn main() {
                 .long("pid")
                 .value_name("PID")
                 .validator(validate_pid)
-                .help("Print details of a specific PID")
+                .help("Print details of one or more specific PIDs")
                 .takes_value(true)
+                .multiple(true)
                 .conflicts_with("summary"),
         )
         .arg(
@@ -349,11 +353,15 @@ fn main() {
         _ => 25,
     };
 
-    let pid_to_print = {
+    let pids_to_print = {
         if matches.is_present("pid") {
-            matches.value_of("pid").unwrap().parse::<Pid>().unwrap()
+            let pid_strs: Vec<_> = matches.values_of("pid").unwrap().collect();
+            pid_strs
+                .into_iter()
+                .map(|p| p.parse::<Pid>().unwrap())
+                .collect::<Vec<Pid>>()
         } else {
-            0
+            vec![0]
         }
     };
 
@@ -364,7 +372,7 @@ fn main() {
     ) {
         (true, _, _) => Print::Top,
         (_, true, _) => Print::Stats,
-        (_, _, true) => Print::Pid(pid_to_print),
+        (_, _, true) => Print::Pid,
         _ => Print::Top,
     };
 
@@ -406,7 +414,7 @@ fn main() {
             print_session_summary(&session_summary, elapsed_time, count_to_print, sort_by)
         }
         Print::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
-        Print::Pid(pid_to_print) => print_pid_details(&session_summary, pid_to_print),
+        Print::Pid => print_pid_details(&session_summary, &pids_to_print),
     }
 
     build_pid_graph(&session_summary);
@@ -818,52 +826,54 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
     }
 }
 
-fn print_pid_details(session_summary: &SessionSummary, pid: Pid) {
-    if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
-        println!("");
-        println!("PID {}", pid);
-        print!("{}", pid_summary);
-        println!("  ---------------\n");
-
-        let parent = session_summary
-            .pid_graph
-            .neighbors_directed(pid, Incoming)
-            .peekable();
-        for p in parent {
-            println!("Parent PID: {}", p);
-        }
-
-        if !pid_summary.child_pids.is_empty() {
-            let mut children = session_summary
-                .pid_graph
-                .neighbors_directed(pid, Outgoing)
-                .enumerate()
-                .peekable();
-
-            print!("{} Child PIDs:  ", pid_summary.child_pids.len());
-            while let Some((i, n)) = children.next() {
-                if i % 10 == 0 {
-                    println!("");
-                }
-                if let Some(_) = children.peek() {
-                    print!("{}, ", n);
-                } else {
-                    print!("{}", n);
-                }
-            }
+fn print_pid_details(session_summary: &SessionSummary, pids: &Vec<Pid>) {
+    for pid in pids {
+        if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
             println!("");
-        }
+            println!("PID {}", pid);
+            print!("{}", pid_summary);
+            println!("  ---------------\n");
 
-        if !pid_summary.files.is_empty() {
-            println!("{} files opened:", pid_summary.files.len());
-            for f in pid_summary.files.iter() {
-                println!("{}", f);
+            let parent = session_summary
+                .pid_graph
+                .neighbors_directed(*pid, Incoming)
+                .peekable();
+            for p in parent {
+                println!("Parent PID: {}", p);
             }
-        }
 
-        println!("");
-    } else {
-        println!("PID {} not found", pid);
+            if !pid_summary.child_pids.is_empty() {
+                let mut children = session_summary
+                    .pid_graph
+                    .neighbors_directed(*pid, Outgoing)
+                    .enumerate()
+                    .peekable();
+
+                print!("{} Child PIDs:  ", pid_summary.child_pids.len());
+                while let Some((i, n)) = children.next() {
+                    if i % 10 == 0 {
+                        println!("");
+                    }
+                    if let Some(_) = children.peek() {
+                        print!("{}, ", n);
+                    } else {
+                        print!("{}", n);
+                    }
+                }
+                println!("\n");
+            }
+
+            if !pid_summary.files.is_empty() {
+                println!("{} files opened:", pid_summary.files.len());
+                for f in pid_summary.files.iter() {
+                    println!("{}", f);
+                }
+            }
+
+            println!("");
+        } else {
+            println!("PID {} not found", pid);
+        }
     }
 }
 
@@ -886,5 +896,288 @@ fn parse_elapsed_real_time(buffer: &str) -> Option<chrono::Duration> {
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_data_returns_none_invalid_pid() {
+        assert_eq!(
+            RawData::from_strs("123aaa", "test", None, None, None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_data_returns_none_invalid_length() {
+        assert_eq!(
+            RawData::from_strs("123", "test", Some("1.00000aaa"), None, None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_data_returns_none_invalid_child_pid() {
+        assert_eq!(
+            RawData::from_strs("123", "test", None, None, None, Some("123aaa"),),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_data_constructed_pid_length_child_pid() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "test",
+                Some("1.000000"),
+                Some("EWAT"),
+                Some("/dev/null"),
+                Some("456")
+            ),
+            Some(RawData {
+                pid: 123,
+                syscall: "test",
+                length: Some(1.000000),
+                error: Some("EWAT"),
+                file: Some("/dev/null"),
+                child_pid: Some(456),
+            })
+        );
+    }
+
+    #[test]
+    fn raw_data_constructed_pid_length() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "test",
+                Some("1.000000"),
+                Some("EWAT"),
+                Some("/dev/null"),
+                None,
+            ),
+            Some(RawData {
+                pid: 123,
+                syscall: "test",
+                length: Some(1.000000),
+                error: Some("EWAT"),
+                file: Some("/dev/null"),
+                child_pid: None,
+            })
+        );
+    }
+    #[test]
+    fn raw_data_constructed_pid() {
+        assert_eq!(
+            RawData::from_strs("123", "test", None, Some("EWAT"), Some("/dev/null"), None,),
+            Some(RawData {
+                pid: 123,
+                syscall: "test",
+                length: None,
+                error: Some("EWAT"),
+                file: Some("/dev/null"),
+                child_pid: None,
+            })
+        );
+    }
+
+    #[test]
+    fn syscall_data_captures_lengths() {
+        let input = r##"567   00:09:47.836504 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 221</proc/495/fd> <0.000027>
+567   00:10:56.303348 open("/proc/self/status", O_RDONLY|O_CLOEXEC) = 228</proc/495/status> <0.000028>
+567   00:10:56.360699 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 228</proc/495/fd> <0.000484>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        assert_eq!(
+            pid_data_map[&567].syscall_data["open"].lengths,
+            vec![0.000027, 0.000028, 0.000484]
+        );
+    }
+
+    #[test]
+    fn syscall_data_captures_errors() {
+        let input = r##"823   00:09:51.247794 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000010>
+823   00:09:58.635714 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000013>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        assert_eq!(
+            pid_data_map[&823].syscall_data["ioctl"]
+                .errors
+                .clone()
+                .into_iter()
+                .collect::<Vec<(&str, i32)>>(),
+            vec![("ENOTTY", 2)]
+        );
+    }
+
+    #[test]
+    fn syscall_data_captures_child_pid() {
+        let input = r##"477   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000134>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        assert!(pid_data_map[&477].child_pids.contains(&7390));
+    }
+
+    #[test]
+    fn syscall_data_unfinished_events_ignored() {
+        let input = r##"826   00:09:47.789757 restart_syscall(<... resuming interrupted poll ...> <unfinished ...>
+2690  00:09:47.790444 <... futex resumed> ) = -1 EAGAIN (Resource temporarily unavailable) <0.000025>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        assert_eq!(pid_data_map.contains_key(&826), false)
+    }
+
+    #[test]
+    fn syscall_data_unfinished_open_file_captured() {
+        let input = r##"817   00:09:58.951745 open("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb", O_RDONLY|O_NONBLOCK|O_CLOEXEC <unfinished ...>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        assert!(pid_data_map[&817].files.contains("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb"));
+    }
+
+    #[test]
+    fn syscall_stats_name_correct() {
+        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
+477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        assert_eq!(pid_stats[&477][0].name, "fcntl");
+    }
+
+    #[test]
+    fn syscall_stats_count_correct() {
+        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
+477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        let syscall_stats = &pid_stats[&477];
+        assert_eq!(syscall_stats[0].count, 4);
+    }
+
+    #[test]
+    fn syscall_stats_max_correct() {
+        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
+477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        let syscall_stats = &pid_stats[&477];
+        assert_eq!(syscall_stats[0].max, 1500.0);
+    }
+
+    #[test]
+    fn syscall_stats_min_correct() {
+        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
+477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        let syscall_stats = &pid_stats[&477];
+        assert_eq!(syscall_stats[0].min, 500.0);
+    }
+
+    #[test]
+    fn syscall_stats_avg_correct() {
+        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
+477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        let syscall_stats = &pid_stats[&477];
+        assert_eq!(syscall_stats[0].avg, 1000.0);
+    }
+
+    #[test]
+    fn syscall_stats_errors_correct() {
+        let input = r##"477   00:09:57.959706 wait4(-1, 0x7ffe09dbae50, WNOHANG, NULL) = -1 ECHILD (No child processes) <0.000014>"##
+            .to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let pid_stats = build_syscall_stats(&pid_data_map);
+        let syscall_stats = &pid_stats[&477];
+        assert_eq!(syscall_stats[0].errors["ECHILD"], 1);
+    }
+
+    #[test]
+    fn pid_summary_count_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert_eq!(summary.pid_summaries[&566].syscall_count, 5);
+    }
+
+    #[test]
+    fn pid_summary_active_time_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert_eq!(summary.pid_summaries[&566].active_time, 3000.0);
+    }
+
+    #[test]
+    fn pid_summary_wait_time_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert_eq!(summary.pid_summaries[&566].wait_time, 2000.0);
+    }
+
+    #[test]
+    fn pid_summary_total_time_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert_eq!(summary.pid_summaries[&566].total_time, 5000.0);
+    }
+
+    #[test]
+    fn pid_summary_files_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert!(summary.pid_summaries[&566].files.contains("/proc/net/unix"));
+    }
+
+    #[test]
+    fn pid_summary_child_pids_correct() {
+        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>
+566   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000000>"##.to_string();
+        let pid_data_map = parse_syscall_data(&input);
+        let summary = build_session_summary(&pid_data_map);
+        assert!(summary.pid_summaries[&566].child_pids.contains(&7390));
     }
 }
