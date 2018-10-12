@@ -973,7 +973,7 @@ lazy_static! {
     static ref FILE_RE: Regex = Regex::new(
         r##"(?x)
     ^(?P<pid>\d+)\s+(?P<time>\d{2}:\d{2}:\d{2}\.\d{6})
-    \s(?:<\.{3}\s)?(?:open|openat)(:?\("(?P<file>[^"]+)")?.+
+    \s+(?:<\.{3}\s)?(?:openat|open)(?:\((?:[A-Z_]+,\s+)?"(?P<file>[^"]+)")?.+
     (?:\s+=\s+((:?-)?[\d?]+(?:<[^>]+>)?\s+(?:(?P<error_code>E[A-Z_]+).+)?)<(?P<length>\d+\.\d{6})>|<unfinished\s+\.{3}>)$"##
     )
     .unwrap();
