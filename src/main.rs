@@ -1,4 +1,4 @@
-extern crate clap;
+//#![feature(nll)]
 #[macro_use]
 extern crate lazy_static;
 extern crate petgraph;
@@ -10,7 +10,7 @@ use clap::{App, Arg};
 use petgraph::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
@@ -235,6 +235,10 @@ impl<'a> SessionSummary<'a> {
                         .expect("Invalid comparison on active times")
                 });
             }
+            SortBy::ChildPids => {
+                sorted_summaries
+                    .par_sort_by(|(_, x), (_, y)| (y.child_pids.len().cmp(&x.child_pids.len())));
+            }
             SortBy::Pid => {
                 sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
             }
@@ -257,20 +261,17 @@ impl<'a> SessionSummary<'a> {
 
 enum SortBy {
     ActiveTime,
+    ChildPids,
     Pid,
     SyscallCount,
     TotalTime,
 }
 
-enum Print {
+enum PrintMode {
     Top,
     Stats,
-    Pid(PrintRelatedPids),
-}
-
-enum PrintRelatedPids {
-    Related,
-    One,
+    RelatedPids(Vec<Pid>),
+    SomePids(Vec<Pid>),
 }
 
 static PRINT_FILE_COUNT: usize = 5;
@@ -359,7 +360,13 @@ fn main() {
             Arg::with_name("sort_by")
                 .short("S")
                 .long("sort")
-                .possible_values(&["active_time", "pid", "syscall_count", "total_time"])
+                .possible_values(&[
+                    "active_time",
+                    "child_pids",
+                    "pid",
+                    "syscall_count",
+                    "total_time",
+                ])
                 .default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
                 .help("Field to sort results by"),
@@ -380,31 +387,28 @@ fn main() {
 
     let pids_to_print = {
         if matches.is_present("pid") {
-            let pid_strs: Vec<_> = matches.values_of("pid").unwrap().collect();
-            pid_strs
+            let pid_strs: HashSet<_> = matches.values_of("pid").unwrap().collect();
+            let pid_vec = pid_strs
                 .into_iter()
                 .map(|p| p.parse::<Pid>().unwrap())
-                .collect::<Vec<Pid>>()
+                .collect::<Vec<Pid>>();
+            if matches.is_present("related") {
+                PrintMode::RelatedPids(pid_vec)
+            } else {
+                PrintMode::SomePids(pid_vec)
+            }
         } else {
-            vec![0]
+            if matches.is_present("stats") {
+                PrintMode::Stats
+            } else {
+                PrintMode::Top
+            }
         }
-    };
-
-    let print_mode = match (
-        matches.is_present("top"),
-        matches.is_present("stats"),
-        matches.is_present("pid"),
-        matches.is_present("related"),
-    ) {
-        (true, _, _, _) => Print::Top,
-        (_, true, _, _) => Print::Stats,
-        (_, _, true, true) => Print::Pid(PrintRelatedPids::Related),
-        (_, _, true, false) => Print::Pid(PrintRelatedPids::One),
-        _ => Print::Top,
     };
 
     let sort_by = match matches.value_of("sort_by") {
         Some("active_time") => SortBy::ActiveTime,
+        Some("child_pids") => SortBy::ChildPids,
         Some("pid") => SortBy::Pid,
         Some("syscall_count") => SortBy::SyscallCount,
         Some("total_time") => SortBy::TotalTime,
@@ -437,15 +441,34 @@ fn main() {
 
     let elapsed_time = parse_elapsed_real_time(&buffer);
 
-    match print_mode {
-        Print::Top => {
+    match pids_to_print {
+        PrintMode::Top => {
             print_session_summary(&session_summary, elapsed_time, count_to_print, sort_by)
         }
-        Print::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
-        Print::Pid(related) => print_pid_details(&session_summary, &pids_to_print, related),
-    }
+        PrintMode::Stats => print_pid_stats(&session_summary, count_to_print, sort_by),
+        PrintMode::RelatedPids(pids) => {
+            let mut related_pids = Vec::new();
+            for pid in pids {
+                if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
+                    related_pids.push(pid);
+                    if let Some(parent) = pid_summary.parent_pid {
+                        related_pids.push(parent);
+                    }
 
-    build_pid_graph(&session_summary);
+                    for child in &pid_summary.child_pids {
+                        related_pids.push(*child);
+                    }
+                }
+            }
+
+            let file_lines = parse_file_lines(&buffer, &related_pids);
+            print_pid_details(&session_summary, &related_pids, &file_lines);
+        }
+        PrintMode::SomePids(pids) => {
+            let file_lines = parse_file_lines(&buffer, &pids);
+            print_pid_details(&session_summary, &pids, &file_lines);
+        }
+    }
 }
 
 fn parse_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
@@ -792,7 +815,19 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
         count = session_summary.len()
     }
 
+    let sorted_by = match sort_by {
+        SortBy::ActiveTime => "Active Time",
+        SortBy::ChildPids => "# of Child Processes",
+        SortBy::Pid => "PID #",
+        SortBy::SyscallCount => "Syscall Count",
+        SortBy::TotalTime => "Total Time",
+    };
+
     println!("");
+    println!(
+        "Details of Top {} PIDs by {}\n-----------\n",
+        count, sorted_by
+    );
 
     for (pid, pid_summary) in session_summary
         .to_sorted_summaries(sort_by)
@@ -812,7 +847,7 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
         }
 
         if pid_summary.child_pids.is_empty() {
-            println!("");
+            //println!("");
         } else {
             print!("Child PIDs:  ");
             if pid_summary.child_pids.len() > 10 {
@@ -859,30 +894,10 @@ fn print_pid_stats(session_summary: &SessionSummary, mut count: usize, sort_by: 
 
 fn print_pid_details(
     session_summary: &SessionSummary,
-    pids: &Vec<Pid>,
-    print_related: PrintRelatedPids,
+    pids: &[Pid],
+    file_lines: &HashMap<Pid, Vec<FileData>>,
 ) {
-    let mut pids_to_print = BTreeSet::new();
-
-    if let PrintRelatedPids::Related = print_related {
-        for pid in pids {
-            if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
-                pids_to_print.insert(*pid);
-
-                if let Some(parent) = pid_summary.parent_pid {
-                    pids_to_print.insert(parent);
-                }
-
-                for child in &pid_summary.child_pids {
-                    pids_to_print.insert(*child);
-                }
-            }
-        }
-    } else {
-        pids_to_print.extend(pids);
-    };
-
-    for pid in pids_to_print {
+    for pid in pids {
         if let Some(pid_summary) = session_summary.pid_summaries.get(&pid) {
             println!("");
             println!("PID {}", pid);
@@ -890,16 +905,16 @@ fn print_pid_details(
             println!("  ---------------\n");
 
             if let Some(p) = pid_summary.parent_pid {
-                println!("Parent PID: {}", p);
+                println!("  Parent PID: {}", p);
             }
 
             if !pid_summary.child_pids.is_empty() {
-                print!("Child PIDs:  ");
+                print!("  Child PIDs:  ");
 
                 let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
                 while let Some((i, n)) = child_pid_iter.next() {
                     if i % 10 == 0 && i != 0 {
-                        println!("");
+                        print!("\n    ");
                     }
                     if let Some(_) = child_pid_iter.peek() {
                         print!("{}, ", n);
@@ -907,15 +922,21 @@ fn print_pid_details(
                         print!("{}", n);
                     }
                 }
-                println!("\n");
+                println!("\n  ");
             } else {
                 println!("");
             }
 
-            if !pid_summary.files.is_empty() {
-                println!("{} files opened:", pid_summary.files.len());
-                for f in pid_summary.files.iter() {
-                    println!("{}", f);
+            if let Some(pid_files) = file_lines.get(&pid) {
+                println!("  Slowest file access times for PID {}:\n", pid);
+                println!(
+                    "  {0: >12}\t{1: >15}\t   {2: >15}\t{3: <30}",
+                    "open (ms)", "timestamp", "error", "   file name"
+                );
+                println!("  -----------\t---------------\t   ---------------\t   ----------");
+
+                for file in pid_files.iter().take(10) {
+                    println!("{}", file);
                 }
             }
 
@@ -946,6 +967,153 @@ fn parse_elapsed_real_time(buffer: &str) -> Option<chrono::Duration> {
         }
         _ => None,
     }
+}
+
+lazy_static! {
+    static ref FILE_RE: Regex = Regex::new(
+        r##"(?x)
+    ^(?P<pid>\d+)\s+(?P<time>\d{2}:\d{2}:\d{2}\.\d{6})
+    \s(?:<\.{3}\s)?(?:open|openat)(:?\("(?P<file>[^"]+)")?.+
+    (?:\s+=\s+((:?-)?[\d?]+(?:<[^>]+>)?\s+(?:(?P<error_code>E[A-Z_]+).+)?)<(?P<length>\d+\.\d{6})>|<unfinished\s+\.{3}>)$"##
+    )
+    .unwrap();
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FileData {
+    time: String,
+    name: Option<String>,
+    error: Option<String>,
+    length: Option<f32>,
+}
+
+impl fmt::Display for FileData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let name = match &self.name {
+            Some(n) => n,
+            None => "",
+        };
+        let length = match self.length {
+            Some(l) => l,
+            None => 0.0,
+        };
+        let error = match &self.error {
+            Some(e) => e,
+            None => "",
+        };
+
+        write!(
+            f,
+            "  {0: >10.3}\t{1: >15}\t   {2: >15}\t   {3: <30}",
+            length, self.time, error, name
+        )
+    }
+}
+
+fn parse_file_lines(buffer: &str, pids: &[Pid]) -> HashMap<Pid, Vec<FileData>> {
+    let pid_lines: HashMap<_, _> = pids
+        .iter()
+        .map(|pid| {
+            let mut lines: Vec<_> = buffer
+                .par_lines()
+                .filter(|line| {
+                    FILE_RE
+                        .captures(line)
+                        .map(|cap| cap.name("pid").unwrap().as_str())
+                        .and_then(|pid_str| pid_str.parse::<Pid>().ok())
+                        .filter(|p| p == pid)
+                        .is_some()
+                })
+                .filter_map(|l| {
+                    FILE_RE.captures(l).map(|caps| {
+                        match (
+                            caps.name("file"),
+                            caps.name("error_code"),
+                            caps.name("length"),
+                        ) {
+                            (Some(file), Some(error_code), Some(length)) => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: Some(file.as_str().to_string()),
+                                error: Some(error_code.as_str().to_string()),
+                                length: Some(length.as_str().parse::<f32>().unwrap() * 1000.0),
+                            },
+                            (Some(file), None, Some(length)) => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: Some(file.as_str().to_string()),
+                                error: None,
+                                length: Some(length.as_str().parse::<f32>().unwrap() * 1000.0),
+                            },
+                            (Some(file), None, None) => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: Some(file.as_str().to_string()),
+                                error: None,
+                                length: None,
+                            },
+                            (None, Some(error_code), Some(length)) => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: None,
+                                error: Some(error_code.as_str().to_string()),
+                                length: Some(length.as_str().parse::<f32>().unwrap() * 1000.0),
+                            },
+                            (None, None, Some(length)) => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: None,
+                                error: None,
+                                length: Some(length.as_str().parse::<f32>().unwrap() * 1000.0),
+                            },
+                            _ => FileData {
+                                time: caps.name("time").unwrap().as_str().to_string(),
+                                name: None,
+                                error: None,
+                                length: None,
+                            },
+                        }
+                    })
+                })
+                .collect();
+
+            lines.par_sort_unstable_by(|x, y| (x.time).cmp(&y.time));
+
+            let mut coalesced_lines = coalesce_file_data(&lines);
+            coalesced_lines.par_sort_by(|x, y| {
+                (y.length)
+                    .partial_cmp(&x.length)
+                    .expect("Invalid comparison wben sorting event_stats")
+            });
+
+            (*pid, coalesced_lines)
+        })
+        .collect();
+
+    pid_lines
+}
+
+fn coalesce_file_data(file_data: &[FileData]) -> Vec<FileData> {
+    let mut iter = file_data.iter().peekable();
+
+    let mut complete_entries = Vec::new();
+
+    while let Some(entry) = iter.next() {
+        match (&entry.name, entry.length) {
+            (Some(_), Some(_)) => complete_entries.push(entry.clone()),
+            (Some(f), None) => {
+                if let Some(next) = iter.peek() {
+                    complete_entries.push(FileData {
+                        time: entry.time.clone(),
+                        name: Some(f.clone()),
+                        length: next.length,
+                        error: next.error.clone(),
+                    });
+                    iter.next();
+                } else {
+                    complete_entries.push(entry.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    complete_entries
 }
 
 #[cfg(test)]
