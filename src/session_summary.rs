@@ -175,8 +175,16 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
+        let sorted_by = match sort_by {
+            SortBy::ActiveTime => "Active Time",
+            SortBy::ChildPids => "# of Child Processes",
+            SortBy::Pid => "PID #",
+            SortBy::SyscallCount => "Syscall Count",
+            SortBy::TotalTime => "Total Time",
+        };
+
         println!("");
-        println!("Top {} PIDs\n-----------\n", count);
+        println!("Top {} PIDs by {}\n-----------\n", count, sorted_by);
 
         println!(
             "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
@@ -283,7 +291,7 @@ impl<'a> SessionSummary<'a> {
         }
     }
 
-    pub fn print_pid_details(&self, pids: &[Pid], file_lines: &HashMap<Pid, Vec<FileData>>) {
+    pub fn print_pid_details(&self, pids: &[Pid], file_lines: &HashMap<Pid, Vec<FileData<'a>>>) {
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 println!("");
@@ -315,15 +323,19 @@ impl<'a> SessionSummary<'a> {
                 }
 
                 if let Some(pid_files) = file_lines.get(&pid) {
-                    println!("  Slowest file access times for PID {}:\n", pid);
-                    println!(
-                        "  {0: >12}\t{1: >15}\t   {2: >15}\t{3: <30}",
-                        "open (ms)", "timestamp", "error", "   file name"
-                    );
-                    println!("  -----------\t---------------\t   ---------------\t   ----------");
+                    if pid_files.len() > 0 {
+                        println!("  Slowest file access times for PID {}:\n", pid);
+                        println!(
+                            "  {0: >10}\t{1: >15}\t   {2: >15}\t{3: <30}",
+                            "open (ms)", "timestamp", "error", "   file name"
+                        );
+                        println!(
+                            "  ----------\t---------------\t   ---------------\t   ----------"
+                        );
 
-                    for file in pid_files.iter().take(10) {
-                        println!("{}", file);
+                        for file in pid_files.iter().take(10) {
+                            println!("{}", file);
+                        }
                     }
                 }
 
@@ -338,6 +350,7 @@ impl<'a> SessionSummary<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::parse;
     use crate::syscall_data::*;
     use crate::syscall_stats::*;
 
@@ -348,7 +361,8 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert_eq!(summary.pid_summaries[&566].syscall_count, 5);
@@ -361,7 +375,8 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert_eq!(summary.pid_summaries[&566].active_time, 3000.0);
@@ -374,7 +389,8 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert_eq!(summary.pid_summaries[&566].wait_time, 2000.0);
@@ -387,7 +403,8 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 5000.0);
@@ -400,7 +417,8 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert!(summary.pid_summaries[&566].files.contains("/proc/net/unix"));
@@ -414,7 +432,8 @@ mod tests {
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>
 566   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000000>"##.to_string();
-        let pid_data_map = parse_syscall_data(&input);
+        let raw_data = parse(&input);
+        let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
         assert!(summary.pid_summaries[&566].child_pids.contains(&7390));
