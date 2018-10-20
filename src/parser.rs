@@ -1,18 +1,8 @@
-#[macro_use]
-extern crate criterion;
-extern crate lazy_static;
-extern crate rayon;
-
 use chrono::NaiveTime;
-use criterion::Criterion;
+use crate::Pid;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt;
-use std::fs::File;
-use std::io::prelude::*;
-
-type Pid = i32;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
@@ -168,16 +158,150 @@ fn sort_parsed_data<'a>(parsed_data: Vec<RawData<'a>>) -> HashMap<Pid, Vec<RawDa
     sorted_data
 }
 
-fn parse_strace() {
-    let mut f = File::open("bench_set").unwrap();
-    let mut buffer = String::new();
-    f.read_to_string(&mut buffer).unwrap();
-    let syscall_data = parse(&buffer);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("parse strace", |b| b.iter(|| parse_strace()));
-}
+    #[test]
+    fn raw_data_returns_none_invalid_pid() {
+        assert_eq!(
+            RawData::from_strs("123aaa", "00:09:47.790763", "test", None, None, None, None),
+            None
+        );
+    }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+    #[test]
+    fn raw_data_returns_none_invalid_time() {
+        assert_eq!(
+            RawData::from_strs(
+                "123aaa",
+                "00:09:47.790763abcdefg",
+                "test",
+                None,
+                None,
+                None,
+                None
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_data_returns_some_invalid_length() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "00:09:47.790763",
+                "test",
+                Some("1.00000aaa"),
+                None,
+                None,
+                None
+            ),
+            Some(RawData {
+                pid: 123,
+                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
+                syscall: "test",
+                length: None,
+                file: None,
+                error: None,
+                child_pid: None,
+            })
+        );
+    }
+
+    #[test]
+    fn raw_data_returns_some_invalid_child_pid() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "00:09:47.790763",
+                "test",
+                None,
+                None,
+                None,
+                Some("123aaa"),
+            ),
+            Some(RawData {
+                pid: 123,
+                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
+                syscall: "test",
+                length: None,
+                file: None,
+                error: None,
+                child_pid: None,
+            })
+        );
+    }
+
+    #[test]
+    fn raw_data_constructed_pid_length_child_pid() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "00:09:47.790763",
+                "test",
+                Some("1.000000"),
+                Some("/dev/null"),
+                Some("EWAT"),
+                Some("456")
+            ),
+            Some(RawData {
+                pid: 123,
+                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
+                syscall: "test",
+                length: Some(1.000000),
+                file: Some("/dev/null"),
+                error: Some("EWAT"),
+                child_pid: Some(456),
+            })
+        );
+    }
+
+    #[test]
+    fn raw_data_constructed_pid_length() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "00:09:47.790763",
+                "test",
+                Some("1.000000"),
+                Some("/dev/null"),
+                Some("EWAT"),
+                None,
+            ),
+            Some(RawData {
+                pid: 123,
+                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
+                syscall: "test",
+                length: Some(1.000000),
+                file: Some("/dev/null"),
+                error: Some("EWAT"),
+                child_pid: None,
+            })
+        );
+    }
+    #[test]
+    fn raw_data_constructed_pid() {
+        assert_eq!(
+            RawData::from_strs(
+                "123",
+                "00:09:47.790763",
+                "test",
+                None,
+                Some("/dev/null"),
+                Some("EWAT"),
+                None,
+            ),
+            Some(RawData {
+                pid: 123,
+                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
+                syscall: "test",
+                length: None,
+                file: Some("/dev/null"),
+                error: Some("EWAT"),
+                child_pid: None,
+            })
+        );
+    }
+}

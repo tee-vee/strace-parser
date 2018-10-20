@@ -1,9 +1,3 @@
-#[macro_use]
-extern crate lazy_static;
-extern crate petgraph;
-extern crate rayon;
-extern crate regex;
-
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use clap::{App, Arg};
@@ -12,6 +6,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 mod file_data;
+mod parser;
 mod pid_summary;
 mod real_time;
 mod session_summary;
@@ -177,7 +172,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    let syscall_data = syscall_data::parse_syscall_data(&buffer);
+    let raw_data = parser::parse(&buffer);
+
+    let syscall_data = syscall_data::build_syscall_data(&raw_data);
 
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
 
@@ -190,12 +187,12 @@ fn main() {
         PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
         PrintMode::RelatedPids(pids) => {
             let related_pids = session_summary.related_pids(&pids);
-            let file_lines = file_data::parse_open_lines(&buffer, &related_pids);
+            let file_lines = file_data::files_opened(raw_data, &related_pids);
 
             session_summary.print_pid_details(&related_pids, &file_lines);
         }
         PrintMode::SomePids(pids) => {
-            let file_lines = file_data::parse_open_lines(&buffer, &pids);
+            let file_lines = file_data::files_opened(raw_data, &pids);
 
             session_summary.print_pid_details(&pids, &file_lines);
         }
