@@ -2,7 +2,7 @@ use crate::parser::RawData;
 use crate::Pid;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
     pub errors: BTreeMap<&'a str, Pid>,
@@ -17,7 +17,7 @@ impl<'a> SyscallData<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub files: BTreeSet<&'a str>,

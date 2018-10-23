@@ -16,8 +16,8 @@ pub struct SessionSummary<'a> {
 
 impl<'a> SessionSummary<'a> {
     pub fn from_syscall_stats(
-        session_stats: HashMap<Pid, Vec<SyscallStats<'a>>>,
-        mut pid_data: HashMap<Pid, PidData<'a>>,
+        session_stats: &HashMap<Pid, Vec<SyscallStats<'a>>>,
+        pid_data: &HashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary {
             pid_summaries: HashMap::new(),
@@ -35,9 +35,8 @@ impl<'a> SessionSummary<'a> {
                 .par_iter()
                 .filter(|stat| match stat.name.as_ref() {
                     "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
-                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "select" | "wait4" => {
-                        false
-                    }
+                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "pselect6" | "select"
+                    | "wait4" | "waitid" => false,
                     _ => true,
                 })
                 .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
@@ -47,7 +46,8 @@ impl<'a> SessionSummary<'a> {
                 .par_iter()
                 .filter(|stat| match stat.name.as_ref() {
                     "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
-                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "select" | "wait4" => true,
+                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "pselect6" | "select"
+                    | "wait4" | "waitid" => true,
                     _ => false,
                 })
                 .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
@@ -55,21 +55,17 @@ impl<'a> SessionSummary<'a> {
 
             let total_time = active_time + wait_time;
 
-            let extracted_pid_data = pid_data.remove(&pid).expect("Pid not found in pid_data");
-            let files = extracted_pid_data.files;
-            let child_pids = extracted_pid_data.child_pids;
-
             summary.pid_summaries.insert(
-                pid,
+                *pid,
                 PidSummary {
                     syscall_count,
                     active_time,
                     wait_time,
                     total_time,
-                    syscall_stats,
-                    files,
+                    syscall_stats: syscall_stats.clone(),
+                    files: pid_data[&pid].files.clone(),
                     parent_pid: None,
-                    child_pids,
+                    child_pids: pid_data[&pid].child_pids.clone(),
                 },
             );
         }
@@ -345,6 +341,11 @@ impl<'a> SessionSummary<'a> {
             }
         }
     }
+
+    pub fn pids(&self) -> Vec<Pid> {
+        let pids: Vec<_> = self.pid_summaries.keys().map(|k| *k).collect();
+        pids
+    }
 }
 
 #[cfg(test)]
@@ -364,7 +365,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].syscall_count, 5);
     }
 
@@ -378,7 +379,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].active_time, 3000.0);
     }
 
@@ -392,7 +393,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].wait_time, 2000.0);
     }
 
@@ -406,7 +407,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 5000.0);
     }
 
@@ -420,7 +421,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert!(summary.pid_summaries[&566].files.contains("/proc/net/unix"));
     }
 
@@ -435,7 +436,7 @@ mod tests {
         let raw_data = parse(&input);
         let pid_data_map = build_syscall_data(&raw_data);
         let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(syscall_stats, pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert!(summary.pid_summaries[&566].child_pids.contains(&7390));
     }
 }

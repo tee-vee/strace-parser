@@ -1,14 +1,12 @@
 #[macro_use]
 extern crate criterion;
-extern crate lazy_static;
 extern crate rayon;
 
 use chrono::NaiveTime;
 use criterion::Criterion;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 
