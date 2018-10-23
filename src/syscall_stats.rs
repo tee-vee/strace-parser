@@ -82,7 +82,7 @@ pub fn build_syscall_stats<'a>(
         event_stats.par_sort_by(|x, y| {
             (y.total)
                 .partial_cmp(&x.total)
-                .expect("Invalid comparison wben sorting event_stats")
+                .expect("Invalid comparison when sorting event_stats")
         });
 
         syscall_stats.insert(*pid, event_stats);

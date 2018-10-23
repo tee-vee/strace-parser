@@ -130,17 +130,19 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     let mut child_pid = None;
     let mut error = None;
 
-    let eq_pos = tokens.iter().rposition(|&t| t == "=");
-    if let Some(pos) = eq_pos {
-        if syscall == "clone" {
-            if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
-                child_pid = Some(child_pid_str);
+    if let Some(_) = length {
+        let eq_pos = tokens.iter().rposition(|&t| t == "=");
+        if let Some(pos) = eq_pos {
+            if syscall == "clone" {
+                if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
+                    child_pid = Some(child_pid_str);
+                }
             }
-        }
 
-        let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
-        if let Some(e_pos) = err_pos {
-            error = tokens.get(pos + e_pos).map(|t| *t);
+            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
+            if let Some(e_pos) = err_pos {
+                error = tokens.get(pos + e_pos).map(|t| *t);
+            }
         }
     }
 

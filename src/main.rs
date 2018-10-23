@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 mod file_data;
+mod histogram;
 mod parser;
 mod pid_summary;
 mod real_time;
@@ -28,6 +29,7 @@ pub enum PrintMode {
     Stats,
     RelatedPids(Vec<Pid>),
     SomePids(Vec<Pid>),
+    Histogram((String, Option<Vec<Pid>>)),
 }
 
 fn validate_pid(p: String) -> Result<(), String> {
@@ -63,13 +65,23 @@ fn main() {
                 .conflicts_with("top"),
         )
         .arg(
+            Arg::with_name("histogram")
+                .short("h")
+                .long("histogram")
+                .takes_value(true)
+                .value_name("SYSCALL")
+                .help("Prints a log\u{2082} histogram of the execution times for <SYSCALL>")
+                .conflicts_with("top")
+                .conflicts_with("stats"),
+        )
+        .arg(
             Arg::with_name("pid")
                 .short("p")
                 .long("pid")
+                .takes_value(true)
                 .value_name("PID")
                 .validator(validate_pid)
                 .help("Print details of one or more specific PIDs")
-                .takes_value(true)
                 .multiple(true)
                 .conflicts_with("top")
                 .conflicts_with("stats"),
@@ -87,16 +99,17 @@ fn main() {
             Arg::with_name("count")
                 .short("c")
                 .long("count")
+                .takes_value(true)
                 .value_name("COUNT")
                 .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
                 .help("The number of PIDs to print")
-                .validator(validate_count)
-                .takes_value(true),
+                .validator(validate_count),
         )
         .arg(
             Arg::with_name("sort_by")
                 .short("S")
                 .long("sort")
+                .value_name("SORT_BY")
                 .possible_values(&[
                     "active_time",
                     "child_pids",
@@ -122,7 +135,7 @@ fn main() {
         _ => 25,
     };
 
-    let pids_to_print = {
+    let print_mode = {
         if matches.is_present("pid") {
             let pid_strs: HashSet<_> = matches.values_of("pid").unwrap().collect();
             let pid_vec = pid_strs
@@ -131,12 +144,19 @@ fn main() {
                 .collect::<Vec<Pid>>();
             if matches.is_present("related") {
                 PrintMode::RelatedPids(pid_vec)
+            } else if matches.is_present("histogram") {
+                PrintMode::Histogram((
+                    matches.value_of("histogram").unwrap().to_string(),
+                    Some(pid_vec),
+                ))
             } else {
                 PrintMode::SomePids(pid_vec)
             }
         } else {
             if matches.is_present("stats") {
                 PrintMode::Stats
+            } else if matches.is_present("histogram") {
+                PrintMode::Histogram((matches.value_of("histogram").unwrap().to_string(), None))
             } else {
                 PrintMode::Top
             }
@@ -178,11 +198,11 @@ fn main() {
 
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
 
-    let session_summary = SessionSummary::from_syscall_stats(syscall_stats, syscall_data);
+    let session_summary = SessionSummary::from_syscall_stats(&syscall_stats, &syscall_data);
 
     let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
 
-    match pids_to_print {
+    match print_mode {
         PrintMode::Top => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
         PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
         PrintMode::RelatedPids(pids) => {
@@ -195,6 +215,13 @@ fn main() {
             let file_lines = file_data::files_opened(raw_data, &pids);
 
             session_summary.print_pid_details(&pids, &file_lines);
+        }
+        PrintMode::Histogram((syscall, pids)) => {
+            if let Some(pids) = pids {
+                histogram::print_histogram(&syscall, &pids, &syscall_data);
+            } else {
+                histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data);
+            }
         }
     }
 }
