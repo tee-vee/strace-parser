@@ -48,7 +48,7 @@ fn validate_count(c: String) -> Result<(), String> {
 
 fn main() {
     let matches = App::new("strace parser")
-        .version("0.2.0")
+        .version("0.2.4")
         .author("Will Chandler <wchandler@gitlab.com")
         .about("Summarizes raw strace output")
         .arg(
@@ -110,13 +110,7 @@ fn main() {
                 .short("S")
                 .long("sort")
                 .value_name("SORT_BY")
-                .possible_values(&[
-                    "active_time",
-                    "child_pids",
-                    "pid",
-                    "syscall_count",
-                    "total_time",
-                ])
+                .possible_values(&["active_time", "children", "pid", "syscalls", "total_time"])
                 .default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
                 .help("Field to sort results by"),
@@ -165,9 +159,9 @@ fn main() {
 
     let sort_by = match matches.value_of("sort_by") {
         Some("active_time") => SortBy::ActiveTime,
-        Some("child_pids") => SortBy::ChildPids,
+        Some("children") => SortBy::ChildPids,
         Some("pid") => SortBy::Pid,
-        Some("syscall_count") => SortBy::SyscallCount,
+        Some("syscalls") => SortBy::SyscallCount,
         Some("total_time") => SortBy::TotalTime,
         _ => SortBy::ActiveTime,
     };

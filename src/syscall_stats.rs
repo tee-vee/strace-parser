@@ -19,12 +19,12 @@ impl<'a> fmt::Display for SyscallStats<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}",
+            "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}\t",
             self.name, self.count, self.total, self.max, self.avg, self.min
         )?;
 
         for (err, count) in self.errors.iter() {
-            write!(f, "\t{}: {}", err, count)?;
+            write!(f, "{}: {}    ", err, count)?;
         }
 
         Ok(())
