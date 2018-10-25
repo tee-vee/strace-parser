@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use clap::{App, Arg};
@@ -176,6 +179,8 @@ fn main() {
         }
     };
 
+    println!("Starting {}", chrono::Local::now());
+    let start = chrono::Local::now();
     let mut buffer = String::new();
 
     f.read_to_string(&mut buffer)
@@ -186,12 +191,16 @@ fn main() {
         std::process::exit(1);
     }
 
+    let file_loaded = chrono::Local::now();
     let raw_data = parser::parse(&buffer);
 
+    let data_parsed = chrono::Local::now();
     let syscall_data = syscall_data::build_syscall_data(&raw_data);
 
+    let data_collected = chrono::Local::now();
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
 
+    let stats_built = chrono::Local::now();
     let session_summary = SessionSummary::from_syscall_stats(&syscall_stats, &syscall_data);
 
     let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
@@ -218,4 +227,12 @@ fn main() {
             }
         }
     }
+    let done = chrono::Local::now();
+    println!("Start: {}", start);
+    println!("End: {}", done);
+    println!("Time to read file: {}", file_loaded - start);
+    println!("Time to parse file: {}", data_parsed - file_loaded);
+    println!("Time to collect data: {}", data_collected - data_parsed);
+    println!("Time to generate stats: {}", stats_built - data_collected);
+    println!("Time to print: {}", done - stats_built);
 }

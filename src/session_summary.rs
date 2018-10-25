@@ -4,9 +4,32 @@ use crate::{syscall_data::PidData, Pid, PidSummary};
 use crate::{syscall_stats::SyscallStats, SortBy};
 use petgraph::prelude::*;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 static PRINT_FILE_COUNT: usize = 5;
+
+lazy_static! {
+    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
+        let mut s = HashSet::new();
+        s.insert("epoll_ctl");
+        s.insert("epoll_wait");
+        s.insert("epoll_pwait");
+        s.insert("futex");
+        s.insert("nanosleep");
+        s.insert("restart_syscall");
+        s.insert("poll");
+        s.insert("ppoll");
+        s.insert("pselect");
+        s.insert("pselect6");
+        s.insert("select");
+        s.insert("wait4");
+        s.insert("waitid");
+        s.insert("epoll_ctl");
+        s.insert("epoll_ctl");
+        s.insert("epoll_ctl");
+        s
+    };
+}
 
 pub struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
@@ -33,23 +56,13 @@ impl<'a> SessionSummary<'a> {
 
             let active_time = syscall_stats
                 .par_iter()
-                .filter(|stat| match stat.name.as_ref() {
-                    "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
-                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "pselect6" | "select"
-                    | "wait4" | "waitid" => false,
-                    _ => true,
-                })
+                .filter(|stat| !WAIT_SYSCALLS.contains(stat.name))
                 .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
                 .sum();
 
             let wait_time = syscall_stats
                 .par_iter()
-                .filter(|stat| match stat.name.as_ref() {
-                    "epoll_ctl" | "epoll_wait" | "epoll_pwait" | "futex" | "nanosleep"
-                    | "restart_syscall" | "poll" | "ppoll" | "pselect" | "pselect6" | "select"
-                    | "wait4" | "waitid" => true,
-                    _ => false,
-                })
+                .filter(|stat| WAIT_SYSCALLS.contains(stat.name))
                 .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
                 .sum();
 
@@ -171,16 +184,10 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        let sorted_by = match sort_by {
-            SortBy::ActiveTime => "Active Time",
-            SortBy::ChildPids => "# of Child Processes",
-            SortBy::Pid => "PID #",
-            SortBy::SyscallCount => "Syscall Count",
-            SortBy::TotalTime => "Total Time",
-        };
+        let sort_desc = self.sort_description(&sort_by);
 
         println!("");
-        println!("Top {} PIDs by {}\n-----------\n", count, sorted_by);
+        println!("Top {} PIDs by {}\n-----------\n", count, sort_desc);
 
         println!(
             "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
@@ -216,18 +223,12 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        let sorted_by = match sort_by {
-            SortBy::ActiveTime => "Active Time",
-            SortBy::ChildPids => "# of Child Processes",
-            SortBy::Pid => "PID #",
-            SortBy::SyscallCount => "Syscall Count",
-            SortBy::TotalTime => "Total Time",
-        };
+        let sort_desc = self.sort_description(&sort_by);
 
         println!("");
         println!(
             "Details of Top {} PIDs by {}\n-----------\n",
-            count, sorted_by
+            count, sort_desc
         );
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
@@ -345,6 +346,16 @@ impl<'a> SessionSummary<'a> {
     pub fn pids(&self) -> Vec<Pid> {
         let pids: Vec<_> = self.pid_summaries.keys().map(|k| *k).collect();
         pids
+    }
+
+    fn sort_description(&self, sort_by: &SortBy) -> String {
+        match sort_by {
+            SortBy::ActiveTime => "Active Time".to_string(),
+            SortBy::ChildPids => "# of Child Processes".to_string(),
+            SortBy::Pid => "PID #".to_string(),
+            SortBy::SyscallCount => "Syscall Count".to_string(),
+            SortBy::TotalTime => "Total Time".to_string(),
+        }
     }
 }
 
