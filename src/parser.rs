@@ -1,8 +1,8 @@
 use chrono::NaiveTime;
 use crate::Pid;
+use fnv::FnvHashMap;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
@@ -68,11 +68,31 @@ enum CallStatus {
     Started,
 }
 
-pub fn parse<'a>(buffer: &'a str) -> HashMap<Pid, Vec<RawData<'a>>> {
-    let data = buffer.par_lines().filter_map(|l| parse_line(l)).collect();
-    let sorted_data = sort_parsed_data(data);
+pub fn parse<'a>(buffer: &'a str) -> FnvHashMap<Pid, Vec<RawData<'a>>> {
+    let data = buffer
+        .par_lines()
+        .fold(
+            || FnvHashMap::default(),
+            |mut map, line| {
+                if let Some(raw_data) = parse_line(line) {
+                    let vec = map.entry(raw_data.pid).or_insert(Vec::new());
+                    vec.push(raw_data);
+                }
+                map
+            },
+        )
+        .reduce(
+            || FnvHashMap::default(),
+            |mut map, child_map| {
+                for (pid, data_vec) in child_map.into_iter() {
+                    let vec = map.entry(pid).or_insert(Vec::new());
+                    vec.extend(data_vec);
+                }
+                map
+            },
+        );
 
-    sorted_data
+    data
 }
 
 fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
@@ -147,17 +167,6 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     }
 
     RawData::from_strs(pid, time, syscall, length, file, error, child_pid)
-}
-
-fn sort_parsed_data<'a>(parsed_data: Vec<RawData<'a>>) -> HashMap<Pid, Vec<RawData<'a>>> {
-    let mut sorted_data = HashMap::new();
-
-    for data in parsed_data.into_iter() {
-        let pid_entry = sorted_data.entry(data.pid).or_insert(Vec::new());
-        pid_entry.push(data);
-    }
-
-    sorted_data
 }
 
 #[cfg(test)]

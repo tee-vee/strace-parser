@@ -1,8 +1,8 @@
 use chrono::NaiveTime;
 use crate::parser::RawData;
 use crate::Pid;
+use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,10 +48,10 @@ impl<'a> fmt::Display for FileData<'a> {
 }
 
 pub fn files_opened<'a>(
-    raw_data: HashMap<Pid, Vec<RawData<'a>>>,
+    raw_data: FnvHashMap<Pid, Vec<RawData<'a>>>,
     pids: &[Pid],
-) -> HashMap<Pid, Vec<FileData<'a>>> {
-    let pid_data: HashMap<_, _> = pids
+) -> FnvHashMap<Pid, Vec<FileData<'a>>> {
+    let pid_data: FnvHashMap<_, _> = pids
         .iter()
         .map(|pid| {
             let pid_data = raw_data[pid].clone();

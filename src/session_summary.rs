@@ -2,15 +2,15 @@ use chrono::Duration;
 use crate::file_data::FileData;
 use crate::{syscall_data::PidData, Pid, PidSummary};
 use crate::{syscall_stats::SyscallStats, SortBy};
+use fnv::{FnvHashMap, FnvHashSet};
 use petgraph::prelude::*;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
 
 static PRINT_FILE_COUNT: usize = 5;
 
 lazy_static! {
-    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
-        let mut s = HashSet::new();
+    static ref WAIT_SYSCALLS: FnvHashSet<&'static str> = {
+        let mut s = FnvHashSet::default();
         s.insert("epoll_ctl");
         s.insert("epoll_wait");
         s.insert("epoll_pwait");
@@ -32,18 +32,18 @@ lazy_static! {
 }
 
 pub struct SessionSummary<'a> {
-    pid_summaries: HashMap<Pid, PidSummary<'a>>,
+    pid_summaries: FnvHashMap<Pid, PidSummary<'a>>,
     all_time: f32,
     all_active_time: f32,
 }
 
 impl<'a> SessionSummary<'a> {
     pub fn from_syscall_stats(
-        session_stats: &HashMap<Pid, Vec<SyscallStats<'a>>>,
-        pid_data: &HashMap<Pid, PidData<'a>>,
+        session_stats: &FnvHashMap<Pid, Vec<SyscallStats<'a>>>,
+        pid_data: &FnvHashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary {
-            pid_summaries: HashMap::new(),
+            pid_summaries: FnvHashMap::default(),
             all_time: 0.0,
             all_active_time: 0.0,
         };
@@ -288,7 +288,7 @@ impl<'a> SessionSummary<'a> {
         }
     }
 
-    pub fn print_pid_details(&self, pids: &[Pid], file_lines: &HashMap<Pid, Vec<FileData<'a>>>) {
+    pub fn print_pid_details(&self, pids: &[Pid], file_lines: &FnvHashMap<Pid, Vec<FileData<'a>>>) {
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 println!("");

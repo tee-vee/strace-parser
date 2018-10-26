@@ -1,8 +1,9 @@
 use crate::syscall_data::PidData;
 use crate::Pid;
-use std::collections::{BTreeMap, HashMap};
+use fnv::FnvHashMap;
+use std::collections::BTreeMap;
 
-pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &HashMap<Pid, PidData>) {
+pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &FnvHashMap<Pid, PidData>) {
     let distribution = build_distribution(syscall, pids, syscall_data);
 
     let pid_str = build_pid_str(pids);
@@ -17,13 +18,13 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &HashMap<Pid, 
 
     println!("\n  syscall: {}\n  pids: {}\n", syscall, pid_str);
     println!(
-        "    {0: >10}   {1: <10}\t: {2: <}\t\t {3: <10}",
+        "    {0: >10}   {1: <10}\t: {2: <8}\t\t {3: <10}",
         "\u{03BC}secs", "", "count", "distribution",
     );
 
     for (pow, count) in distribution.iter() {
         println!(
-            "    {0: >10} -> {1: <10}\t: {2: <}\t\t|{3: <40}|",
+            "    {0: >10} -> {1: <10}\t: {2: <8}\t\t|{3: <40}|",
             if *pow == 0 { 0 } else { 2u64.pow(*pow as u32) },
             2u64.pow(*pow + 1 as u32) - 1,
             *count,
@@ -36,7 +37,7 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &HashMap<Pid, 
 fn build_distribution(
     syscall: &str,
     pids: &[Pid],
-    syscall_data: &HashMap<Pid, PidData>,
+    syscall_data: &FnvHashMap<Pid, PidData>,
 ) -> BTreeMap<u32, i32> {
     let mut distribution = BTreeMap::new();
     let mut max_pow = 0;

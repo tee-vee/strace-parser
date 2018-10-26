@@ -4,7 +4,7 @@ extern crate lazy_static;
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use clap::{App, Arg};
-use std::collections::HashSet;
+use fnv::FnvHashSet;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -134,7 +134,7 @@ fn main() {
 
     let print_mode = {
         if matches.is_present("pid") {
-            let pid_strs: HashSet<_> = matches.values_of("pid").unwrap().collect();
+            let pid_strs: FnvHashSet<_> = matches.values_of("pid").unwrap().collect();
             let pid_vec = pid_strs
                 .into_iter()
                 .map(|p| p.parse::<Pid>().unwrap())
