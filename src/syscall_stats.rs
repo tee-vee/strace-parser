@@ -1,7 +1,8 @@
 use crate::syscall_data::PidData;
 use crate::Pid;
+use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone)]
@@ -32,9 +33,9 @@ impl<'a> fmt::Display for SyscallStats<'a> {
 }
 
 pub fn build_syscall_stats<'a>(
-    data: &HashMap<Pid, PidData<'a>>,
-) -> HashMap<Pid, Vec<SyscallStats<'a>>> {
-    let mut syscall_stats = HashMap::new();
+    data: &FnvHashMap<Pid, PidData<'a>>,
+) -> FnvHashMap<Pid, Vec<SyscallStats<'a>>> {
+    let mut syscall_stats = FnvHashMap::default();
 
     for (pid, pid_stats) in data {
         let mut event_stats: Vec<_> = pid_stats

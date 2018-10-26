@@ -4,6 +4,7 @@ extern crate rayon;
 
 use chrono::NaiveTime;
 use criterion::Criterion;
+use fnv::FnvHashMap;
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -91,7 +92,7 @@ impl<'a> SyscallData<'a> {
 
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
-    pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
+    pub syscall_data: FnvHashMap<&'a str, SyscallData<'a>>,
     pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
 }
@@ -99,18 +100,42 @@ pub struct PidData<'a> {
 impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
-            syscall_data: HashMap::new(),
+            syscall_data: FnvHashMap::default(),
             files: BTreeSet::new(),
             child_pids: Vec::new(),
         }
     }
 }
 
-pub fn parse<'a>(buffer: &'a str) -> HashMap<Pid, Vec<RawData<'a>>> {
-    let data = buffer.par_lines().filter_map(|l| parse_line(l)).collect();
-    let sorted_data = sort_parsed_data(data);
+pub fn parse<'a>(buffer: &'a str) -> FnvHashMap<Pid, Vec<RawData<'a>>> {
+    //let data: Vec<_> = buffer.par_lines().filter_map(|l| parse_line(l) ).collect();
+    //let sorted_data = sort_parsed_data(data);
 
-    sorted_data
+    //sorted_data
+    let data = buffer
+        .par_lines()
+        .fold(
+            || FnvHashMap::default(),
+            |mut map, line| {
+                if let Some(raw_data) = parse_line(line) {
+                    let vec = map.entry(raw_data.pid).or_insert(Vec::new());
+                    vec.push(raw_data);
+                }
+                map
+            },
+        )
+        .reduce(
+            || FnvHashMap::default(),
+            |mut map, child_map| {
+                for (pid, data_vec) in child_map.into_iter() {
+                    let vec = map.entry(pid).or_insert(Vec::new());
+                    vec.extend(data_vec);
+                }
+                map
+            },
+        );
+
+    data
 }
 
 fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
@@ -185,8 +210,8 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     RawData::from_strs(pid, time, syscall, length, file, error, child_pid)
 }
 
-fn sort_parsed_data<'a>(parsed_data: Vec<RawData<'a>>) -> HashMap<Pid, Vec<RawData<'a>>> {
-    let mut sorted_data = HashMap::new();
+fn sort_parsed_data<'a>(parsed_data: Vec<RawData<'a>>) -> FnvHashMap<Pid, Vec<RawData<'a>>> {
+    let mut sorted_data = FnvHashMap::default();
 
     for data in parsed_data.into_iter() {
         let pid_entry = sorted_data.entry(data.pid).or_insert(Vec::new());
@@ -197,9 +222,9 @@ fn sort_parsed_data<'a>(parsed_data: Vec<RawData<'a>>) -> HashMap<Pid, Vec<RawDa
 }
 
 pub fn build_syscall_data<'a>(
-    parsed_data: &HashMap<Pid, Vec<RawData<'a>>>,
-) -> HashMap<Pid, PidData<'a>> {
-    let mut syscall_data = HashMap::new();
+    parsed_data: &FnvHashMap<Pid, Vec<RawData<'a>>>,
+) -> FnvHashMap<Pid, PidData<'a>> {
+    let mut syscall_data = FnvHashMap::default();
     for (pid, data_vec) in parsed_data {
         for data in data_vec {
             let pid_entry = syscall_data.entry(*pid).or_insert(PidData::new());
@@ -237,7 +262,7 @@ fn parse_benchmark(c: &mut Criterion) {
     c.bench_function("parse strace", move |b| b.iter(|| parse_strace(DATA)));
 }
 
-fn build_data(raw_data: &HashMap<Pid, Vec<RawData>>) {
+fn build_data(raw_data: &FnvHashMap<Pid, Vec<RawData>>) {
     let _data = build_syscall_data(raw_data);
 }
 

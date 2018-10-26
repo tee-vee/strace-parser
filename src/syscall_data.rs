@@ -1,6 +1,7 @@
 use crate::parser::RawData;
 use crate::Pid;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use fnv::FnvHashMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
@@ -19,7 +20,7 @@ impl<'a> SyscallData<'a> {
 
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
-    pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
+    pub syscall_data: FnvHashMap<&'a str, SyscallData<'a>>,
     pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
 }
@@ -27,7 +28,7 @@ pub struct PidData<'a> {
 impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
-            syscall_data: HashMap::new(),
+            syscall_data: FnvHashMap::default(),
             files: BTreeSet::new(),
             child_pids: Vec::new(),
         }
@@ -35,9 +36,9 @@ impl<'a> PidData<'a> {
 }
 
 pub fn build_syscall_data<'a>(
-    parsed_data: &HashMap<Pid, Vec<RawData<'a>>>,
-) -> HashMap<Pid, PidData<'a>> {
-    let mut syscall_data = HashMap::new();
+    parsed_data: &FnvHashMap<Pid, Vec<RawData<'a>>>,
+) -> FnvHashMap<Pid, PidData<'a>> {
+    let mut syscall_data = FnvHashMap::default();
     for (pid, data_vec) in parsed_data {
         for data in data_vec {
             let pid_entry = syscall_data.entry(*pid).or_insert(PidData::new());
