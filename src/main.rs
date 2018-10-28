@@ -189,9 +189,6 @@ fn main() {
         std::process::exit(1);
     }
 
-    //let raw_data = parser::parse(&buffer);
-
-    //let syscall_data = syscall_data::build_syscall_data(&raw_data);
     let syscall_data = syscall_data::build_syscall_data(&buffer);
 
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
