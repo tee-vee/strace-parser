@@ -1,7 +1,5 @@
 use chrono::NaiveTime;
 use crate::Pid;
-use fnv::FnvHashMap;
-use rayon::prelude::*;
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -68,34 +66,7 @@ enum CallStatus {
     Started,
 }
 
-pub fn parse<'a>(buffer: &'a str) -> FnvHashMap<Pid, Vec<RawData<'a>>> {
-    let data = buffer
-        .par_lines()
-        .fold(
-            || FnvHashMap::default(),
-            |mut map, line| {
-                if let Some(raw_data) = parse_line(line) {
-                    let vec = map.entry(raw_data.pid).or_insert(Vec::new());
-                    vec.push(raw_data);
-                }
-                map
-            },
-        )
-        .reduce(
-            || FnvHashMap::default(),
-            |mut map, child_map| {
-                for (pid, data_vec) in child_map.into_iter() {
-                    let vec = map.entry(pid).or_insert(Vec::new());
-                    vec.extend(data_vec);
-                }
-                map
-            },
-        );
-
-    data
-}
-
-fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
+pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     let tokens: SmallVec<[&str; 20]> = line.split_whitespace().collect();
 
     if tokens.len() < 5 {
