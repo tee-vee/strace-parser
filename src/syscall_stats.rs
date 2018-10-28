@@ -95,7 +95,6 @@ pub fn build_syscall_stats<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parse;
     use crate::syscall_data::build_syscall_data;
 
     #[test]
@@ -105,8 +104,7 @@ mod tests {
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         assert_eq!(pid_stats[&477][0].name, "fcntl");
     }
@@ -118,8 +116,7 @@ mod tests {
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].count, 4);
@@ -132,8 +129,7 @@ mod tests {
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].max, 1500.0);
@@ -146,8 +142,7 @@ mod tests {
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].min, 500.0);
@@ -160,8 +155,7 @@ mod tests {
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].avg, 1000.0);
@@ -171,8 +165,7 @@ mod tests {
     fn syscall_stats_errors_correct() {
         let input = r##"477   00:09:57.959706 wait4(-1, 0x7ffe09dbae50, WNOHANG, NULL) = -1 ECHILD (No child processes) <0.000014>"##
             .to_string();
-        let raw_data = parse(&input);
-        let pid_data_map = build_syscall_data(&raw_data);
+        let pid_data_map = build_syscall_data(&input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].errors["ECHILD"], 1);

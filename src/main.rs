@@ -189,9 +189,10 @@ fn main() {
         std::process::exit(1);
     }
 
-    let raw_data = parser::parse(&buffer);
+    //let raw_data = parser::parse(&buffer);
 
-    let syscall_data = syscall_data::build_syscall_data(&raw_data);
+    //let syscall_data = syscall_data::build_syscall_data(&raw_data);
+    let syscall_data = syscall_data::build_syscall_data(&buffer);
 
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
 
@@ -204,12 +205,12 @@ fn main() {
         PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
         PrintMode::RelatedPids(pids) => {
             let related_pids = session_summary.related_pids(&pids);
-            let file_lines = file_data::files_opened(raw_data, &related_pids);
+            let file_lines = file_data::files_opened(&syscall_data, &related_pids);
 
             session_summary.print_pid_details(&related_pids, &file_lines);
         }
         PrintMode::SomePids(pids) => {
-            let file_lines = file_data::files_opened(raw_data, &pids);
+            let file_lines = file_data::files_opened(&syscall_data, &pids);
 
             session_summary.print_pid_details(&pids, &file_lines);
         }

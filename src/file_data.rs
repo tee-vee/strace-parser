@@ -1,5 +1,6 @@
 use chrono::NaiveTime;
 use crate::parser::RawData;
+use crate::syscall_data::PidData;
 use crate::Pid;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
@@ -48,21 +49,16 @@ impl<'a> fmt::Display for FileData<'a> {
 }
 
 pub fn files_opened<'a>(
-    raw_data: FnvHashMap<Pid, Vec<RawData<'a>>>,
+    raw_data: &FnvHashMap<Pid, PidData<'a>>,
     pids: &[Pid],
 ) -> FnvHashMap<Pid, Vec<FileData<'a>>> {
     let pid_data: FnvHashMap<_, _> = pids
         .iter()
         .map(|pid| {
-            let pid_data = raw_data[pid].clone();
-            let mut data: Vec<_> = pid_data
-                .into_par_iter()
-                .filter(|d| d.pid == *pid)
-                .filter(|d| d.syscall == "open" || d.syscall == "openat")
-                .collect();
-            data.par_sort_unstable_by(|x, y| (x.time).cmp(&y.time));
+            let mut open_events = raw_data[pid].open_events.clone();
+            open_events.par_sort_unstable_by(|x, y| (x.time).cmp(&y.time));
 
-            let mut coalesced_data: Vec<_> = coalesce_file_data(data.as_slice());
+            let mut coalesced_data: Vec<_> = coalesce_file_data(open_events.as_slice());
             coalesced_data.par_sort_by(|x, y| {
                 (&y.length)
                     .partial_cmp(&x.length)
