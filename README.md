@@ -2,9 +2,11 @@ A small tool to analyze raw `strace` data.
 
 It prints the following metrics:
    * A summary of the top processes, including total syscalls and time spent
+   * A histogram showing the distribution of execution times for a given syscall
    * Statistics on each type of syscall made for a given number of proccesses
    * Details of a process, including the statistics above as well as slow
         file accesses and a list of child processes
+
 
 **NOTE**: `strace` must be run with `-tt -T -f` flags for the required data
 to be captured
@@ -34,6 +36,27 @@ Top 10 PIDs
 Total PIDs: 101
 System Time: 1843.512939s
 Real Time: 60.60968s
+```
+
+**Example Histogram**:
+```
+  syscall: read
+  pids: 8115 815 8128 8436 7438 7962 7490 8431 8286 8175 and 240 more...
+
+    μsecs                  	     count	 distribution
+    ------------------------	  --------	 ----------------------------------------
+             0 -> 1         	         0	|                                        |
+             2 -> 3         	         0	|                                        |
+             4 -> 7         	        22	|                                        |
+             8 -> 15        	      1285	|****************************************|
+            16 -> 31        	      1150	|***********************************     |
+            32 -> 63        	       319	|*********                               |
+            64 -> 127       	        99	|***                                     |
+           128 -> 255       	        58	|*                                       |
+           256 -> 511       	        19	|                                        |
+           512 -> 1023      	         4	|                                        |
+          1024 -> 2047      	         5	|                                        |
+          2048 -> 4095      	         3	|                                        |
 ```
 
 **Example Statistics**:
