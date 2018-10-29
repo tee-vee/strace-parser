@@ -3,6 +3,7 @@ use crate::file_data::FileData;
 use crate::{syscall_data::PidData, Pid, PidSummary};
 use crate::{syscall_stats::SyscallStats, SortBy};
 use fnv::{FnvHashMap, FnvHashSet};
+use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
 
@@ -24,9 +25,6 @@ lazy_static! {
         s.insert("select");
         s.insert("wait4");
         s.insert("waitid");
-        s.insert("epoll_ctl");
-        s.insert("epoll_ctl");
-        s.insert("epoll_ctl");
         s
     };
 }
@@ -190,20 +188,25 @@ impl<'a> SessionSummary<'a> {
         println!("Top {} PIDs by {}\n-----------\n", count, sort_desc);
 
         println!(
-            "  {0: <10}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}",
-            "pid", "active (ms)", "wait (ms)", "total (ms)", "% active", "syscalls"
+            "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
+            "pid", "active", "wait", "total", "% of", "syscalls", "children"
         );
-        println!("  ----------\t----------\t---------\t---------\t---------\t---------");
+        println!(
+            "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
+            "", "(ms)", "(ms)", "(ms)", "actv time", "", ""
+        );
+        println!("  -------\t----------\t----------\t----------\t---------\t---------\t---------");
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
             println!(
-                "  {0: <10}\t{1: >10.3}\t{2: >10.3}\t{3: >10.3}\t{4: >8.2}%\t{5: >9}",
+                "  {0: <7}\t{1: >10.3}\t{2: >10.3}\t{3: >10.3}\t{4: >8.2}%\t{5: >9}\t{6: >9}",
                 pid,
                 pid_summary.active_time,
                 pid_summary.wait_time,
                 pid_summary.total_time,
                 pid_summary.active_time / self.all_active_time * 100.0,
-                pid_summary.syscall_count
+                pid_summary.syscall_count,
+                pid_summary.child_pids.len(),
             );
         }
         println!("");
