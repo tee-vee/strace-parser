@@ -13,6 +13,7 @@ pub struct PidSummary<'a> {
     pub files: BTreeSet<&'a str>,
     pub parent_pid: Option<Pid>,
     pub child_pids: Vec<Pid>,
+    pub execve: Option<Vec<&'a str>>,
 }
 
 impl<'a> fmt::Display for PidSummary<'a> {
@@ -25,12 +26,12 @@ impl<'a> fmt::Display for PidSummary<'a> {
         writeln!(
             f,
             "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
-            "syscall", "count", "total", "max", "avg", "min", "errors"
+            "", "", "total", "max", "avg", "min", ""
         );
         writeln!(
             f,
             "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
-            "", "", "(ms)", "(ms)", "(ms)", "(ms)", ""
+            "syscall", "count", "(ms)", "(ms)", "(ms)", "(ms)", "errors"
         );
         writeln!(
             f,

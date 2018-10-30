@@ -20,6 +20,7 @@ pub struct RawData<'a> {
     pub file: Option<&'a str>,
     pub error: Option<&'a str>,
     pub child_pid: Option<Pid>,
+    pub execve: Option<Vec<&'a str>>,
 }
 
 impl<'a> RawData<'a> {
@@ -31,6 +32,7 @@ impl<'a> RawData<'a> {
         file: Option<&'a str>,
         error: Option<&'a str>,
         child_pid_str: Option<&'a str>,
+        execve: Option<Vec<&'a str>>,
     ) -> Option<RawData<'a>> {
         let pid = match pid_str.parse() {
             Ok(pid) => pid,
@@ -66,6 +68,7 @@ impl<'a> RawData<'a> {
             file,
             error,
             child_pid,
+            execve,
         })
     }
 }
@@ -96,6 +99,7 @@ pub struct PidData<'a> {
     pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
+    pub execve: Option<Vec<&'a str>>,
 }
 
 impl<'a> PidData<'a> {
@@ -105,11 +109,12 @@ impl<'a> PidData<'a> {
             files: BTreeSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
+            execve: None,
         }
     }
 }
 
-fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
+pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     let tokens: SmallVec<[&str; 20]> = line.split_whitespace().collect();
 
     if tokens.len() < 5 {
@@ -127,6 +132,7 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
 
     let syscall;
     let mut file = None;
+    let mut execve = None;
 
     match call_status {
         CallStatus::Started => {
@@ -143,6 +149,9 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
             } else if syscall == "openat" {
                 let file_quoted = tokens[3];
                 file = Some(&file_quoted[1..file_quoted.len() - 2]);
+            } else if syscall == "execve" {
+                let v = vec![split[1]];
+                execve = Some(v);
             }
         }
         CallStatus::Resumed => {
@@ -164,21 +173,43 @@ fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     let mut child_pid = None;
     let mut error = None;
 
-    let eq_pos = tokens.iter().rposition(|&t| t == "=");
-    if let Some(pos) = eq_pos {
-        if syscall == "clone" {
-            if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
-                child_pid = Some(child_pid_str);
+    if let Some(_) = length {
+        let eq_pos = tokens.iter().rposition(|&t| t == "=");
+        if let Some(pos) = eq_pos {
+            if syscall == "clone" {
+                if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
+                    child_pid = Some(child_pid_str);
+                }
+            }
+
+            if syscall == "execve" {
+                let len_from_execve_to_eq = pos - 3;
+                if let Some(ref mut v) = execve {
+                    let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
+                    while let Some(cmd) = cmds.next() {
+                        &v.push(cmd);
+                    }
+                }
+            }
+
+            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
+            if let Some(e_pos) = err_pos {
+                error = tokens.get(pos + e_pos).map(|t| *t);
             }
         }
-
-        let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
-        if let Some(e_pos) = err_pos {
-            error = tokens.get(pos + e_pos).map(|t| *t);
+    } else if syscall == "execve" {
+        if let CallStatus::Started = call_status {
+            let len_from_execve_to_unfin = tokens.len() - 5;
+            if let Some(ref mut v) = execve {
+                let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
+                while let Some(cmd) = cmds.next() {
+                    v.push(cmd);
+                }
+            }
         }
     }
 
-    RawData::from_strs(pid, time, syscall, length, file, error, child_pid)
+    RawData::from_strs(pid, time, syscall, length, file, error, child_pid, execve)
 }
 
 pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
@@ -228,6 +259,12 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
         pid_entry.child_pids.push(child_pid);
     }
 
+    if raw_data.syscall == "execve" {
+        if let Some(ref e) = raw_data.execve {
+            pid_entry.execve = Some(e.clone());
+        }
+    }
+
     if raw_data.syscall == "open" || raw_data.syscall == "openat" {
         pid_entry.open_events.push(raw_data);
     }
@@ -264,6 +301,10 @@ fn coalesce_pid_data<'a>(
         pid_entry
             .open_events
             .extend(temp_pid_data.open_events.into_iter());
+
+        if let Some(temp_execve) = temp_pid_data.execve {
+            pid_entry.execve = Some(temp_execve);
+        }
     }
 }
 

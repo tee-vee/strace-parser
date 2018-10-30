@@ -1,7 +1,8 @@
 use chrono::Duration;
-use crate::file_data::FileData;
-use crate::{syscall_data::PidData, Pid, PidSummary};
-use crate::{syscall_stats::SyscallStats, SortBy};
+use crate::{
+    file_data::FileData, syscall_data::PidData, syscall_stats::SyscallStats, Pid, PidSummary,
+    SortBy,
+};
 use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
@@ -77,6 +78,7 @@ impl<'a> SessionSummary<'a> {
                     files: pid_data[&pid].files.clone(),
                     parent_pid: None,
                     child_pids: pid_data[&pid].child_pids.clone(),
+                    execve: pid_data[&pid].execve.clone(),
                 },
             );
         }
@@ -182,18 +184,16 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        let sort_desc = self.sort_description(&sort_by);
-
         println!("");
-        println!("Top {} PIDs by {}\n-----------\n", count, sort_desc);
+        println!("Top {} PIDs by {}\n-----------\n", count, sort_by);
 
         println!(
             "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
-            "pid", "active", "wait", "total", "% of", "syscalls", "children"
+            "", "active", "wait", "total", "% of", "", ""
         );
         println!(
             "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
-            "", "(ms)", "(ms)", "(ms)", "actv time", "", ""
+            "pid", "(ms)", "(ms)", "(ms)", "actv time", "syscalls", "children"
         );
         println!("  -------\t----------\t----------\t----------\t---------\t---------\t---------");
 
@@ -226,12 +226,10 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        let sort_desc = self.sort_description(&sort_by);
-
         println!("");
         println!(
             "Details of Top {} PIDs by {}\n-----------\n",
-            count, sort_desc
+            count, sort_by
         );
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
@@ -243,21 +241,25 @@ impl<'a> SessionSummary<'a> {
             print!("{}", pid_summary);
             println!("  ---------------\n");
 
+            if let Some(ref e) = pid_summary.execve {
+                print_execve(e);
+            }
+
             if let Some(p) = pid_summary.parent_pid {
-                println!("Parent PID: {}", p);
+                println!("  Parent PID: {}", p);
             }
 
             if !pid_summary.child_pids.is_empty() {
-                print!("Child PIDs:  ");
+                print!("  Child PIDs:  ");
                 if pid_summary.child_pids.len() > 10 {
                     for (i, p) in pid_summary.child_pids.iter().enumerate().take(10) {
                         if i != 9 {
                             print!("{}, ", p);
                         } else {
-                            println!("{}", p);
+                            print!("{} ", p);
                         }
                     }
-                    println!("And {} more...", pid_summary.child_pids.len() - 10);
+                    println!("and {} more...", pid_summary.child_pids.len() - 10);
                 } else {
                     let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
                     while let Some((i, n)) = child_pid_iter.next() {
@@ -270,20 +272,23 @@ impl<'a> SessionSummary<'a> {
                             print!("{}", n);
                         }
                     }
+                    println!("");
                 }
-                println!("\n");
             }
 
             if !pid_summary.files.is_empty() {
-                println!("Files opened:");
+                println!("  Files opened:");
                 if pid_summary.files.len() > PRINT_FILE_COUNT {
                     for f in pid_summary.files.iter().take(PRINT_FILE_COUNT) {
-                        println!("{}", f);
+                        println!("    {}", f);
                     }
-                    println!("And {} more...", pid_summary.files.len() - PRINT_FILE_COUNT);
+                    println!(
+                        "    And {} more...",
+                        pid_summary.files.len() - PRINT_FILE_COUNT
+                    );
                 } else {
                     for f in pid_summary.files.iter() {
-                        println!("{}", f);
+                        println!("    {}", f);
                     }
                 }
             }
@@ -299,6 +304,10 @@ impl<'a> SessionSummary<'a> {
                 print!("{}", pid_summary);
                 println!("  ---------------\n");
 
+                if let Some(ref e) = pid_summary.execve {
+                    print_execve(e);
+                }
+
                 if let Some(p) = pid_summary.parent_pid {
                     println!("  Parent PID: {}", p);
                 }
@@ -309,7 +318,7 @@ impl<'a> SessionSummary<'a> {
                     let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
                     while let Some((i, n)) = child_pid_iter.next() {
                         if i % 10 == 0 && i != 0 {
-                            print!("\n    ");
+                            print!("\n               ");
                         }
                         if let Some(_) = child_pid_iter.peek() {
                             print!("{}, ", n);
@@ -318,8 +327,6 @@ impl<'a> SessionSummary<'a> {
                         }
                     }
                     println!("\n  ");
-                } else {
-                    println!("");
                 }
 
                 if let Some(pid_files) = file_lines.get(&pid) {
@@ -329,9 +336,7 @@ impl<'a> SessionSummary<'a> {
                             "  {0: >10}\t{1: >15}\t   {2: >15}\t{3: <30}",
                             "open (ms)", "timestamp", "error", "   file name"
                         );
-                        println!(
-                            "  ----------\t---------------\t   ---------------\t   ----------"
-                        );
+                        println!("  ----------\t---------------\t   ---------------\t   ---------");
 
                         for file in pid_files.iter().take(10) {
                             println!("{}", file);
@@ -350,16 +355,26 @@ impl<'a> SessionSummary<'a> {
         let pids: Vec<_> = self.pid_summaries.keys().map(|k| *k).collect();
         pids
     }
+}
 
-    fn sort_description(&self, sort_by: &SortBy) -> String {
-        match sort_by {
-            SortBy::ActiveTime => "Active Time".to_string(),
-            SortBy::ChildPids => "# of Child Processes".to_string(),
-            SortBy::Pid => "PID #".to_string(),
-            SortBy::SyscallCount => "Syscall Count".to_string(),
-            SortBy::TotalTime => "Total Time".to_string(),
-        }
-    }
+fn print_execve(execve: &[&str]) {
+    let cmd_quoted = match execve.iter().nth(0) {
+        Some(c) => c[..c.len() - 1].to_string(),
+        None => String::new(),
+    };
+    let cmd = cmd_quoted.replace("\"", "");
+
+    let args: String = execve
+        .iter()
+        .skip(1)
+        .map(|t| {
+            let mut s = t.to_string();
+            s.push_str(" ");
+            s
+        })
+        .collect();
+    println!("  Program Executed: {}", cmd);
+    println!("  Args: {}", args);
 }
 
 #[cfg(test)]
