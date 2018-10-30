@@ -14,8 +14,8 @@ pub struct FileData<'a> {
     length: Option<f32>,
 }
 
-impl<'a> FileData<'a> {
-    pub fn from_raw_data(raw_data: &RawData<'a>) -> FileData<'a> {
+impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
+    fn from(raw_data: &RawData<'a>) -> FileData<'a> {
         FileData {
             time: raw_data.time,
             file: raw_data.file,
@@ -78,7 +78,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
 
     while let Some(entry) = iter.next() {
         match (&entry.file, entry.length) {
-            (Some(_), Some(_)) => complete_entries.push(FileData::from_raw_data(entry)),
+            (Some(_), Some(_)) => complete_entries.push(FileData::from(entry)),
             (Some(f), None) => {
                 if let Some(next) = iter.peek() {
                     complete_entries.push(FileData {
@@ -89,7 +89,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
                     });
                     iter.next();
                 } else {
-                    complete_entries.push(FileData::from_raw_data(entry));
+                    complete_entries.push(FileData::from(entry));
                 }
             }
             _ => {}

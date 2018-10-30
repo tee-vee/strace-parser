@@ -1,5 +1,6 @@
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
+use self::sort_by::SortBy;
 use clap::{App, Arg};
 use fnv::FnvHashSet;
 use std::fs::File;
@@ -11,18 +12,11 @@ mod parser;
 mod pid_summary;
 mod real_time;
 mod session_summary;
+mod sort_by;
 mod syscall_data;
 mod syscall_stats;
 
 type Pid = i32;
-
-pub enum SortBy {
-    ActiveTime,
-    ChildPids,
-    Pid,
-    SyscallCount,
-    TotalTime,
-}
 
 pub enum PrintMode {
     Top,
@@ -47,80 +41,81 @@ fn validate_count(c: String) -> Result<(), String> {
 }
 
 fn main() {
-    let matches =
-        App::new("strace parser")
-            .version("0.2.4")
-            .author("Will Chandler <wchandler@gitlab.com")
-            .about("Summarizes raw strace output")
-            .arg(Arg::with_name("top").short("t").long("top").help(
+    let matches = App::new("strace parser")
+        .version("0.2.5")
+        .author("Will Chandler <wchandler@gitlab.com>")
+        .about("Summarizes raw strace output")
+        .arg(
+            Arg::with_name("top").short("t").long("top").help(
                 "Prints a summary top <COUNT> PIDs, as determined by <SORT> - Default output",
-            ))
-            .arg(
-                Arg::with_name("stats")
-                    .short("s")
-                    .long("stats")
-                    .help("Prints a breakdown of syscall stats for <COUNT> PIDs")
-                    .conflicts_with("top"),
-            )
-            .arg(
-                Arg::with_name("histogram")
-                    .short("h")
-                    .long("histogram")
-                    .takes_value(true)
-                    .value_name("SYSCALL")
-                    .help("Prints a log\u{2082} histogram of the execution times for <SYSCALL>")
-                    .conflicts_with("top")
-                    .conflicts_with("stats"),
-            )
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .takes_value(true)
-                    .value_name("PID")
-                    .validator(validate_pid)
-                    .help("Print details of one or more specific PIDs")
-                    .multiple(true)
-                    .conflicts_with("top")
-                    .conflicts_with("stats"),
-            )
-            .arg(
-                Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("With `--pid`, will print details of parent and child PIDs of <PID>")
-                    .conflicts_with("top")
-                    .conflicts_with("stats")
-                    .requires("pid"),
-            )
-            .arg(
-                Arg::with_name("count")
-                    .short("c")
-                    .long("count")
-                    .takes_value(true)
-                    .value_name("COUNT")
-                    .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
-                    .help("The number of PIDs to print")
-                    .validator(validate_count),
-            )
-            .arg(
-                Arg::with_name("sort_by")
-                    .short("S")
-                    .long("sort")
-                    .value_name("SORT_BY")
-                    .possible_values(&["active_time", "children", "pid", "syscalls", "total_time"])
-                    .default_value_ifs(&[("stats", None, "active_time")])
-                    .takes_value(true)
-                    .help("Field to sort results by"),
-            )
-            .arg(
-                Arg::with_name("INPUT")
-                    .help("Sets file to be parsed")
-                    .required(true)
-                    .takes_value(true)
-                    .index(1),
-            )
-            .get_matches();
+            ),
+        )
+        .arg(
+            Arg::with_name("stats")
+                .short("s")
+                .long("stats")
+                .help("Prints a breakdown of syscall stats for <COUNT> PIDs")
+                .conflicts_with("top"),
+        )
+        .arg(
+            Arg::with_name("histogram")
+                .short("h")
+                .long("histogram")
+                .takes_value(true)
+                .value_name("SYSCALL")
+                .help("Prints a log\u{2082} scale histogram of the execution times for <SYSCALL>")
+                .conflicts_with("top")
+                .conflicts_with("stats"),
+        )
+        .arg(
+            Arg::with_name("pid")
+                .short("p")
+                .long("pid")
+                .takes_value(true)
+                .value_name("PID")
+                .validator(validate_pid)
+                .help("Print details of one or more specific PIDs")
+                .multiple(true)
+                .conflicts_with("top")
+                .conflicts_with("stats"),
+        )
+        .arg(
+            Arg::with_name("related")
+                .short("r")
+                .long("related")
+                .help("With `--pid`, will print details of parent and child PIDs of <PID>")
+                .conflicts_with("top")
+                .conflicts_with("stats")
+                .requires("pid"),
+        )
+        .arg(
+            Arg::with_name("count")
+                .short("c")
+                .long("count")
+                .takes_value(true)
+                .value_name("COUNT")
+                .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
+                .help("The number of PIDs to print")
+                .validator(validate_count),
+        )
+        .arg(
+            Arg::with_name("sort_by")
+                .short("S")
+                .long("sort")
+                .value_name("SORT_BY")
+                .possible_values(&["active_time", "children", "pid", "syscalls", "total_time"])
+                .default_value_ifs(&[("stats", None, "active_time")])
+                .takes_value(true)
+                .help("Field to sort results by"),
+        )
+        .arg(
+            Arg::with_name("INPUT")
+                .help("Sets file to be parsed")
+                .required(true)
+                .takes_value(true)
+                .index(1),
+        )
+        .get_matches();
 
     let count_to_print = match matches.value_of("count") {
         Some(c) => c.parse::<usize>().unwrap(),
@@ -130,19 +125,19 @@ fn main() {
     let print_mode = {
         if matches.is_present("pid") {
             let pid_strs: FnvHashSet<_> = matches.values_of("pid").unwrap().collect();
-            let pid_vec = pid_strs
+            let pids: Vec<_> = pid_strs
                 .into_iter()
                 .map(|p| p.parse::<Pid>().unwrap())
-                .collect::<Vec<Pid>>();
+                .collect();
             if matches.is_present("related") {
-                PrintMode::RelatedPids(pid_vec)
+                PrintMode::RelatedPids(pids)
             } else if matches.is_present("histogram") {
                 PrintMode::Histogram((
                     matches.value_of("histogram").unwrap().to_string(),
-                    Some(pid_vec),
+                    Some(pids),
                 ))
             } else {
-                PrintMode::SomePids(pid_vec)
+                PrintMode::SomePids(pids)
             }
         } else {
             if matches.is_present("stats") {

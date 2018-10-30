@@ -11,6 +11,7 @@ pub struct RawData<'a> {
     pub file: Option<&'a str>,
     pub error: Option<&'a str>,
     pub child_pid: Option<Pid>,
+    pub execve: Option<Vec<&'a str>>,
 }
 
 impl<'a> RawData<'a> {
@@ -22,6 +23,7 @@ impl<'a> RawData<'a> {
         file: Option<&'a str>,
         error: Option<&'a str>,
         child_pid_str: Option<&'a str>,
+        execve: Option<Vec<&'a str>>,
     ) -> Option<RawData<'a>> {
         let pid = match pid_str.parse() {
             Ok(pid) => pid,
@@ -57,6 +59,7 @@ impl<'a> RawData<'a> {
             file,
             error,
             child_pid,
+            execve,
         })
     }
 }
@@ -84,6 +87,7 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
 
     let syscall;
     let mut file = None;
+    let mut execve = None;
 
     match call_status {
         CallStatus::Started => {
@@ -100,6 +104,9 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
             } else if syscall == "openat" {
                 let file_quoted = tokens[3];
                 file = Some(&file_quoted[1..file_quoted.len() - 2]);
+            } else if syscall == "execve" {
+                let v = vec![split[1]];
+                execve = Some(v);
             }
         }
         CallStatus::Resumed => {
@@ -130,14 +137,34 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
                 }
             }
 
+            if syscall == "execve" {
+                let len_from_execve_to_eq = pos - 3;
+                if let Some(ref mut v) = execve {
+                    let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
+                    while let Some(cmd) = cmds.next() {
+                        &v.push(cmd);
+                    }
+                }
+            }
+
             let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
             if let Some(e_pos) = err_pos {
                 error = tokens.get(pos + e_pos).map(|t| *t);
             }
         }
+    } else if syscall == "execve" {
+        if let CallStatus::Started = call_status {
+            let len_from_execve_to_unfin = tokens.len() - 5;
+            if let Some(ref mut v) = execve {
+                let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
+                while let Some(cmd) = cmds.next() {
+                    v.push(cmd);
+                }
+            }
+        }
     }
 
-    RawData::from_strs(pid, time, syscall, length, file, error, child_pid)
+    RawData::from_strs(pid, time, syscall, length, file, error, child_pid, execve)
 }
 
 #[cfg(test)]
@@ -147,7 +174,16 @@ mod tests {
     #[test]
     fn raw_data_returns_none_invalid_pid() {
         assert_eq!(
-            RawData::from_strs("123aaa", "00:09:47.790763", "test", None, None, None, None),
+            RawData::from_strs(
+                "123aaa",
+                "00:09:47.790763",
+                "test",
+                None,
+                None,
+                None,
+                None,
+                None
+            ),
             None
         );
     }
@@ -162,7 +198,8 @@ mod tests {
                 None,
                 None,
                 None,
-                None
+                None,
+                None,
             ),
             None
         );
@@ -178,7 +215,8 @@ mod tests {
                 Some("1.00000aaa"),
                 None,
                 None,
-                None
+                None,
+                None,
             ),
             Some(RawData {
                 pid: 123,
@@ -188,6 +226,7 @@ mod tests {
                 file: None,
                 error: None,
                 child_pid: None,
+                execve: None,
             })
         );
     }
@@ -203,6 +242,7 @@ mod tests {
                 None,
                 None,
                 Some("123aaa"),
+                None,
             ),
             Some(RawData {
                 pid: 123,
@@ -212,6 +252,7 @@ mod tests {
                 file: None,
                 error: None,
                 child_pid: None,
+                execve: None,
             })
         );
     }
@@ -226,7 +267,8 @@ mod tests {
                 Some("1.000000"),
                 Some("/dev/null"),
                 Some("EWAT"),
-                Some("456")
+                Some("456"),
+                None,
             ),
             Some(RawData {
                 pid: 123,
@@ -236,6 +278,7 @@ mod tests {
                 file: Some("/dev/null"),
                 error: Some("EWAT"),
                 child_pid: Some(456),
+                execve: None,
             })
         );
     }
@@ -251,6 +294,7 @@ mod tests {
                 Some("/dev/null"),
                 Some("EWAT"),
                 None,
+                None,
             ),
             Some(RawData {
                 pid: 123,
@@ -260,6 +304,7 @@ mod tests {
                 file: Some("/dev/null"),
                 error: Some("EWAT"),
                 child_pid: None,
+                execve: None,
             })
         );
     }
@@ -274,6 +319,7 @@ mod tests {
                 Some("/dev/null"),
                 Some("EWAT"),
                 None,
+                None,
             ),
             Some(RawData {
                 pid: 123,
@@ -283,6 +329,59 @@ mod tests {
                 file: Some("/dev/null"),
                 error: Some("EWAT"),
                 child_pid: None,
+                execve: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_execve_finished() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <0.000229>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 13656,
+                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
+                syscall: "execve",
+                length: Some(0.000229),
+                file: None,
+                error: None,
+                child_pid: None,
+                execve: Some(vec![
+                    "\"/bin/sleep\",",
+                    "[\"sleep\",",
+                    "\"1\"],",
+                    "[/*",
+                    "12",
+                    "vars",
+                    "*/])"
+                ])
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_execve_unfinished() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) <unfinished ...>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 13656,
+                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
+                syscall: "execve",
+                length: None,
+                file: None,
+                error: None,
+                child_pid: None,
+                execve: Some(vec![
+                    "\"/bin/sleep\",",
+                    "[\"sleep\",",
+                    "\"1\"],",
+                    "[/*",
+                    "12",
+                    "vars",
+                    "*/])"
+                ])
             })
         );
     }

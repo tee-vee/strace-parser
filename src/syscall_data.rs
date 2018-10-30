@@ -26,6 +26,7 @@ pub struct PidData<'a> {
     pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
+    pub execve: Option<Vec<&'a str>>,
 }
 
 impl<'a> PidData<'a> {
@@ -35,6 +36,7 @@ impl<'a> PidData<'a> {
             files: BTreeSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
+            execve: None,
         }
     }
 }
@@ -86,6 +88,12 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
         pid_entry.child_pids.push(child_pid);
     }
 
+    if raw_data.syscall == "execve" {
+        if let Some(ref e) = raw_data.execve {
+            pid_entry.execve = Some(e.clone());
+        }
+    }
+
     if raw_data.syscall == "open" || raw_data.syscall == "openat" {
         pid_entry.open_events.push(raw_data);
     }
@@ -122,6 +130,10 @@ fn coalesce_pid_data<'a>(
         pid_entry
             .open_events
             .extend(temp_pid_data.open_events.into_iter());
+
+        if let Some(temp_execve) = temp_pid_data.execve {
+            pid_entry.execve = Some(temp_execve);
+        }
     }
 }
 
@@ -168,7 +180,7 @@ mod tests {
         let input = r##"826   00:09:47.789757 restart_syscall(<... resuming interrupted poll ...> <unfinished ...>
 2690  00:09:47.790444 <... futex resumed> ) = -1 EAGAIN (Resource temporarily unavailable) <0.000025>"##.to_string();
         let pid_data_map = build_syscall_data(&input);
-        assert_eq!(pid_data_map.contains_key(&826), true)
+        assert!(pid_data_map.contains_key(&826))
     }
 
     #[test]
@@ -176,5 +188,12 @@ mod tests {
         let input = r##"817   00:09:58.951745 open("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb", O_RDONLY|O_NONBLOCK|O_CLOEXEC <unfinished ...>"##.to_string();
         let pid_data_map = build_syscall_data(&input);
         assert!(pid_data_map[&817].files.contains("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb"));
+    }
+
+    #[test]
+    fn syscall_data_captures_execve() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert!(pid_data_map[&13656].execve.is_some());
     }
 }
