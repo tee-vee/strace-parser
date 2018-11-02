@@ -52,7 +52,13 @@ pub fn files_opened<'a>(
     raw_data: &FnvHashMap<Pid, PidData<'a>>,
     pids: &[Pid],
 ) -> FnvHashMap<Pid, Vec<FileData<'a>>> {
-    let pid_data: FnvHashMap<_, _> = pids
+    let valid_pids: Vec<_> = pids
+        .iter()
+        .filter(|p| raw_data.get(p).is_some())
+        .cloned()
+        .collect();
+
+    let pid_data: FnvHashMap<_, _> = valid_pids
         .iter()
         .map(|pid| {
             let mut open_events = raw_data[pid].open_events.clone();
