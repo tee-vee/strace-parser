@@ -27,14 +27,14 @@ pub enum PrintMode {
 }
 
 fn validate_pid(p: String) -> Result<(), String> {
-    if let Ok(_) = p.parse::<Pid>() {
+    if p.parse::<Pid>().is_ok() {
         return Ok(());
     }
     Err(String::from("PID must be an integer"))
 }
 
 fn validate_count(c: String) -> Result<(), String> {
-    if let Ok(_) = c.parse::<usize>() {
+    if c.parse::<usize>().is_ok() {
         return Ok(());
     }
     Err(String::from("COUNT must be a non-negative integer"))
@@ -110,7 +110,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("INPUT")
-                .help("Sets file to be parsed")
+                .help("File to be parsed")
                 .required(true)
                 .takes_value(true)
                 .index(1),
@@ -174,7 +174,7 @@ fn main() {
     f.read_to_string(&mut buffer)
         .expect("Error: unable to read file to string");
 
-    if buffer.len() == 0 {
+    if buffer.is_empty() {
         eprintln!("Error: {} is empty", file_name);
         std::process::exit(1);
     }

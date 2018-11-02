@@ -85,7 +85,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
                         time: entry.time,
                         file: Some(f),
                         length: next.length,
-                        error: next.error.clone(),
+                        error: next.error,
                     });
                     iter.next();
                 } else {

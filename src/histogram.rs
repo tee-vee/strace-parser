@@ -35,7 +35,7 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &FnvHashMap<Pi
             dist_marker((*count as f32 / max as f32) * 40.0),
         );
     }
-    println!("");
+    println!();
 }
 
 fn build_distribution(
@@ -76,22 +76,17 @@ fn build_distribution(
 
 fn fill_empty_pows(distribution: &mut BTreeMap<u32, i32>, max_pow: u32) {
     for pow in 0..max_pow {
-        if let None = distribution.get(&pow) {
+        if distribution.get(&pow).is_none() {
             distribution.insert(pow, 0);
         }
     }
 }
 
 fn build_pid_list(pids: &[Pid]) -> String {
-    let mut pid_list: String = pids
+    let mut pid_list = pids
         .iter()
         .take(10)
-        .map(|p| {
-            let mut s = p.to_string();
-            s.push_str(" ");
-            s
-        })
-        .collect();
+        .fold(String::new(), |s, p| s + &p.to_string() + " ");
 
     if pids.len() > 10 {
         let addendum = format!("and {} more...", pids.len() - 10);
@@ -105,7 +100,7 @@ fn dist_marker(perc: f32) -> String {
     let mut marker = String::new();
     let count = perc as i32;
     for _ in 0..count {
-        marker += "*";
+        marker += "\u{2587}";
     }
     marker
 }

@@ -69,7 +69,7 @@ enum CallStatus {
     Started,
 }
 
-pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
+pub fn parse_line(line: &str) -> Option<RawData> {
     let tokens: SmallVec<[&str; 20]> = line.split_whitespace().collect();
 
     if tokens.len() < 5 {
@@ -115,24 +115,18 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     }
 
     let length = match tokens.last() {
-        Some(token) => {
-            if token.starts_with('<') {
-                Some(&token[1..token.len() - 1])
-            } else {
-                None
-            }
-        }
-        None => None,
+        Some(token) if token.starts_with('<') => Some(&token[1..token.len() - 1]),
+        _ => None,
     };
 
     let mut child_pid = None;
     let mut error = None;
 
-    if let Some(_) = length {
+    if length.is_some() {
         let eq_pos = tokens.iter().rposition(|&t| t == "=");
         if let Some(pos) = eq_pos {
             if syscall == "clone" {
-                if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
+                if let Some(child_pid_str) = tokens.get(pos + 1).cloned() {
                     child_pid = Some(child_pid_str);
                 }
             }
@@ -140,24 +134,24 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
             if syscall == "execve" {
                 let len_from_execve_to_eq = pos - 3;
                 if let Some(ref mut v) = execve {
-                    let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
-                    while let Some(cmd) = cmds.next() {
-                        &v.push(cmd);
+                    let cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
+                    for cmd in cmds {
+                        v.push(cmd);
                     }
                 }
             }
 
-            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
+            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with('E'));
             if let Some(e_pos) = err_pos {
-                error = tokens.get(pos + e_pos).map(|t| *t);
+                error = tokens.get(pos + e_pos).cloned();
             }
         }
     } else if syscall == "execve" {
         if let CallStatus::Started = call_status {
             let len_from_execve_to_unfin = tokens.len() - 5;
             if let Some(ref mut v) = execve {
-                let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
-                while let Some(cmd) = cmds.next() {
+                let cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
+                for cmd in cmds {
                     v.push(cmd);
                 }
             }
