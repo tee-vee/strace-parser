@@ -184,22 +184,21 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        println!("");
-        println!("Top {} PIDs by {}\n-----------\n", count, sort_by);
+        println!("\nTop {} PIDs by {}\n-----------\n", count, sort_by);
 
         println!(
-            "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
+            "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
             "", "active", "wait", "total", "% of", "", ""
         );
         println!(
-            "  {0: <7}\t{1: >10}\t{2: >10}\t{3: >10}\t{4: >9}\t{5: >9}\t{6: >9}",
+            "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
             "pid", "(ms)", "(ms)", "(ms)", "actv time", "syscalls", "children"
         );
         println!("  -------\t----------\t----------\t----------\t---------\t---------\t---------");
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
             println!(
-                "  {0: <7}\t{1: >10.3}\t{2: >10.3}\t{3: >10.3}\t{4: >8.2}%\t{5: >9}\t{6: >9}",
+                "  {: <7}\t{: >10.3}\t{: >10.3}\t{: >10.3}\t{: >8.2}%\t{: >9}\t{: >9}",
                 pid,
                 pid_summary.active_time,
                 pid_summary.wait_time,
@@ -209,9 +208,8 @@ impl<'a> SessionSummary<'a> {
                 pid_summary.child_pids.len(),
             );
         }
-        println!("");
-        println!("Total PIDs: {}", self.pid_summaries.len());
-        println!("System Time: {0:.6}s", self.all_time / 1000.0);
+        println!("\nTotal PIDs: {}", self.pid_summaries.len());
+        println!("System Time: {:.6}s", self.all_time / 1000.0);
         if let Some(real_time) = elapsed_time {
             println!(
                 "Real Time: {}.{}s",
@@ -226,9 +224,8 @@ impl<'a> SessionSummary<'a> {
             count = self.pid_summaries.len()
         }
 
-        println!("");
         println!(
-            "Details of Top {} PIDs by {}\n-----------\n",
+            "\nDetails of Top {} PIDs by {}\n-----------\n",
             count, sort_by
         );
 
@@ -242,11 +239,11 @@ impl<'a> SessionSummary<'a> {
             println!("  ---------------\n");
 
             if let Some(ref e) = pid_summary.execve {
-                print_execve(e);
+                self.print_execve(e);
             }
 
             if let Some(p) = pid_summary.parent_pid {
-                println!("  Parent PID: {}", p);
+                println!("  Parent PID:  {}", p);
             }
 
             if !pid_summary.child_pids.is_empty() {
@@ -264,15 +261,15 @@ impl<'a> SessionSummary<'a> {
                     let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
                     while let Some((i, n)) = child_pid_iter.next() {
                         if i % 10 == 0 && i != 0 {
-                            println!("");
+                            println!();
                         }
-                        if let Some(_) = child_pid_iter.peek() {
+                        if child_pid_iter.peek().is_some() {
                             print!("{}, ", n);
                         } else {
                             print!("{}", n);
                         }
                     }
-                    println!("");
+                    println!();
                 }
             }
 
@@ -299,17 +296,16 @@ impl<'a> SessionSummary<'a> {
     pub fn print_pid_details(&self, pids: &[Pid], file_lines: &FnvHashMap<Pid, Vec<FileData<'a>>>) {
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
-                println!("");
-                println!("PID {}", pid);
+                println!("\nPID {}", pid);
                 print!("{}", pid_summary);
                 println!("  ---------------\n");
 
                 if let Some(ref e) = pid_summary.execve {
-                    print_execve(e);
+                    self.print_execve(e);
                 }
 
                 if let Some(p) = pid_summary.parent_pid {
-                    println!("  Parent PID: {}", p);
+                    println!("  Parent PID:  {}", p);
                 }
 
                 if !pid_summary.child_pids.is_empty() {
@@ -320,20 +316,20 @@ impl<'a> SessionSummary<'a> {
                         if i % 10 == 0 && i != 0 {
                             print!("\n               ");
                         }
-                        if let Some(_) = child_pid_iter.peek() {
+                        if child_pid_iter.peek().is_some() {
                             print!("{}, ", n);
                         } else {
                             print!("{}", n);
                         }
                     }
-                    println!("\n  ");
+                    println!();
                 }
 
                 if let Some(pid_files) = file_lines.get(&pid) {
-                    if pid_files.len() > 0 {
-                        println!("  Slowest file access times for PID {}:\n", pid);
+                    if !pid_files.is_empty() {
+                        println!("\n  Slowest file access times for PID {}:\n", pid);
                         println!(
-                            "  {0: >10}\t{1: >15}\t   {2: >15}\t{3: <30}",
+                            "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
                             "open (ms)", "timestamp", "error", "   file name"
                         );
                         println!("  ----------\t---------------\t   ---------------\t   ---------");
@@ -344,7 +340,7 @@ impl<'a> SessionSummary<'a> {
                     }
                 }
 
-                println!("");
+                println!();
             } else {
                 println!("PID {} not found", pid);
             }
@@ -352,29 +348,25 @@ impl<'a> SessionSummary<'a> {
     }
 
     pub fn pids(&self) -> Vec<Pid> {
-        let pids: Vec<_> = self.pid_summaries.keys().map(|k| *k).collect();
+        let pids: Vec<_> = self.pid_summaries.keys().cloned().collect();
         pids
     }
-}
 
-fn print_execve(execve: &[&str]) {
-    let cmd_quoted = match execve.iter().nth(0) {
-        Some(c) => c[..c.len() - 1].to_string(),
-        None => String::new(),
-    };
-    let cmd = cmd_quoted.replace("\"", "");
+    fn print_execve(&self, execve: &[&str]) {
+        let cmd_quoted = match execve.get(0) {
+            Some(c) => c[..c.len() - 1].to_string(),
+            None => String::new(),
+        };
+        let cmd = cmd_quoted.replace("\"", "");
 
-    let args: String = execve
-        .iter()
-        .skip(1)
-        .map(|t| {
-            let mut s = t.to_string();
-            s.push_str(" ");
-            s
-        })
-        .collect();
-    println!("  Program Executed: {}", cmd);
-    println!("  Args: {}", args);
+        let args = execve
+            .iter()
+            .skip(2)
+            .fold("[".to_string(), |s, a| s + a + " ");
+
+        println!("  Program Executed: {}", cmd);
+        println!("  Args: {}\n", args);
+    }
 }
 
 #[cfg(test)]

@@ -213,7 +213,7 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
 }
 
 pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
-    let data = buffer
+    buffer
         .par_lines()
         .fold(
             || FnvHashMap::default(),
@@ -230,9 +230,7 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
                 coalesce_pid_data(&mut pid_data_map, temp_map);
                 pid_data_map
             },
-        );
-
-    data
+        )
 }
 
 fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_data: RawData<'a>) {
