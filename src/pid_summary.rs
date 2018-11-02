@@ -20,17 +20,17 @@ impl<'a> fmt::Display for PidSummary<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{0} syscalls, active time: {1:.3}ms, total time: {2:.3}ms\n",
+            "{} syscalls, active time: {:.3}ms, total time: {:.3}ms\n",
             self.syscall_count, self.active_time, self.total_time
         );
         writeln!(
             f,
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: <8}",
+            "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: <8}",
             "", "", "total", "max", "avg", "min", ""
         );
         writeln!(
             f,
-            "  {0: <15}\t{1: >8}\t{2: >10}\t{3: >10}\t{4: >10}\t{5: >10}\t{6: >4}",
+            "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: >4}",
             "syscall", "count", "(ms)", "(ms)", "(ms)", "(ms)", "errors"
         );
         writeln!(

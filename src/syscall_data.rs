@@ -42,34 +42,28 @@ impl<'a> PidData<'a> {
 }
 
 pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
-    let data = buffer
+    buffer
         .par_lines()
-        .fold(
-            || FnvHashMap::default(),
-            |mut pid_data_map, line| {
-                if let Some(raw_data) = parser::parse_line(line) {
-                    add_syscall_data(&mut pid_data_map, raw_data);
-                }
-                pid_data_map
-            },
-        )
-        .reduce(
-            || FnvHashMap::default(),
-            |mut pid_data_map, temp_map| {
-                coalesce_pid_data(&mut pid_data_map, temp_map);
-                pid_data_map
-            },
-        );
-
-    data
+        .fold(FnvHashMap::default, |mut pid_data_map, line| {
+            if let Some(raw_data) = parser::parse_line(line) {
+                add_syscall_data(&mut pid_data_map, raw_data);
+            }
+            pid_data_map
+        })
+        .reduce(FnvHashMap::default, |mut pid_data_map, temp_map| {
+            coalesce_pid_data(&mut pid_data_map, temp_map);
+            pid_data_map
+        })
 }
 
 fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_data: RawData<'a>) {
-    let pid_entry = pid_data_map.entry(raw_data.pid).or_insert(PidData::new());
+    let pid_entry = pid_data_map
+        .entry(raw_data.pid)
+        .or_insert_with(PidData::new);
     let syscall_entry = pid_entry
         .syscall_data
         .entry(raw_data.syscall)
-        .or_insert(SyscallData::new());
+        .or_insert_with(SyscallData::new);
 
     if let Some(length) = raw_data.length {
         syscall_entry.lengths.push(length);
@@ -104,12 +98,12 @@ fn coalesce_pid_data<'a>(
     temp_map: FnvHashMap<Pid, PidData<'a>>,
 ) {
     for (pid, temp_pid_data) in temp_map.into_iter() {
-        let pid_entry = pid_data_map.entry(pid).or_insert(PidData::new());
+        let pid_entry = pid_data_map.entry(pid).or_insert_with(PidData::new);
         for (syscall, temp_syscall_data) in temp_pid_data.syscall_data {
             let syscall_entry = pid_entry
                 .syscall_data
                 .entry(syscall)
-                .or_insert(SyscallData::new());
+                .or_insert_with(SyscallData::new);
 
             syscall_entry
                 .lengths

@@ -1,6 +1,6 @@
 use chrono::{Duration, NaiveTime};
 
-pub fn parse_elapsed_real_time<'a>(buffer: &str) -> Option<Duration> {
+pub fn parse_elapsed_real_time(buffer: &str) -> Option<Duration> {
     let start_line = match buffer.lines().next() {
         Some(line) => line,
         None => return None,

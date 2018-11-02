@@ -61,7 +61,7 @@ pub fn build_syscall_stats<'a>(
                     })
                     .unwrap_or(&(0.0))
                     * 1000.0;
-                let avg = if raw_data.lengths.len() > 0 {
+                let avg = if !raw_data.lengths.is_empty() {
                     total / raw_data.lengths.len() as f32
                 } else {
                     0.0

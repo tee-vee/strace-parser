@@ -52,7 +52,13 @@ pub fn files_opened<'a>(
     raw_data: &FnvHashMap<Pid, PidData<'a>>,
     pids: &[Pid],
 ) -> FnvHashMap<Pid, Vec<FileData<'a>>> {
-    let pid_data: FnvHashMap<_, _> = pids
+    let valid_pids: Vec<_> = pids
+        .iter()
+        .filter(|p| raw_data.get(p).is_some())
+        .cloned()
+        .collect();
+
+    let pid_data: FnvHashMap<_, _> = valid_pids
         .iter()
         .map(|pid| {
             let mut open_events = raw_data[pid].open_events.clone();
@@ -85,7 +91,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
                         time: entry.time,
                         file: Some(f),
                         length: next.length,
-                        error: next.error.clone(),
+                        error: next.error,
                     });
                     iter.next();
                 } else {
