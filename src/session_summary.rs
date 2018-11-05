@@ -1,14 +1,15 @@
 use chrono::Duration;
-use crate::{
-    file_data::FileData, syscall_data::PidData, syscall_stats::SyscallStats, Pid, PidSummary,
-    SortBy,
-};
+use crate::file_data::FileData;
+use crate::pid_summary::{PrintAmt, PrintOptions};
+use crate::syscall_data::PidData;
+use crate::syscall_stats::SyscallStats;
+use crate::{Pid, PidSummary, SortBy};
 use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
 
-static PRINT_FILE_COUNT: usize = 5;
+static PRINT_COUNT: usize = 10;
 
 lazy_static! {
     static ref WAIT_SYSCALLS: FnvHashSet<&'static str> = {
@@ -235,99 +236,27 @@ impl<'a> SessionSummary<'a> {
             }
 
             println!("PID {}", pid);
-            print!("{}", pid_summary);
-            println!("  ---------------\n");
-
-            if let Some(ref e) = pid_summary.execve {
-                self.print_execve(e);
-            }
-
-            if let Some(p) = pid_summary.parent_pid {
-                println!("  Parent PID:  {}", p);
-            }
-
-            if !pid_summary.child_pids.is_empty() {
-                print!("  Child PIDs:  ");
-                if pid_summary.child_pids.len() > 10 {
-                    for (i, p) in pid_summary.child_pids.iter().enumerate().take(10) {
-                        if i != 9 {
-                            print!("{}, ", p);
-                        } else {
-                            print!("{} ", p);
-                        }
-                    }
-                    println!("and {} more...", pid_summary.child_pids.len() - 10);
-                } else {
-                    let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
-                    while let Some((i, n)) = child_pid_iter.next() {
-                        if i % 10 == 0 && i != 0 {
-                            println!();
-                        }
-                        if child_pid_iter.peek().is_some() {
-                            print!("{}, ", n);
-                        } else {
-                            print!("{}", n);
-                        }
-                    }
-                    println!();
-                }
-            }
-
-            if !pid_summary.files.is_empty() {
-                println!("  Files opened:");
-                if pid_summary.files.len() > PRINT_FILE_COUNT {
-                    for f in pid_summary.files.iter().take(PRINT_FILE_COUNT) {
-                        println!("    {}", f);
-                    }
-                    println!(
-                        "    And {} more...",
-                        pid_summary.files.len() - PRINT_FILE_COUNT
-                    );
-                } else {
-                    for f in pid_summary.files.iter() {
-                        println!("    {}", f);
-                    }
-                }
-            }
-            println!("\n");
+            pid_summary.print(PrintOptions {
+                execve: Some(PrintAmt::All),
+                related_pids: Some(PrintAmt::Some(PRINT_COUNT)),
+                files: Some(PrintAmt::Some(PRINT_COUNT)),
+            });
         }
     }
 
-    pub fn print_pid_details(&self, pids: &[Pid], file_lines: &FnvHashMap<Pid, Vec<FileData<'a>>>) {
+    pub fn print_pid_details(&self, pids: &[Pid], file_times: &FnvHashMap<Pid, Vec<FileData<'a>>>) {
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 println!("\nPID {}", pid);
-                print!("{}", pid_summary);
-                println!("  ---------------\n");
+                pid_summary.print(PrintOptions {
+                    execve: Some(PrintAmt::All),
+                    related_pids: Some(PrintAmt::All),
+                    files: None,
+                });
 
-                if let Some(ref e) = pid_summary.execve {
-                    self.print_execve(e);
-                }
-
-                if let Some(p) = pid_summary.parent_pid {
-                    println!("  Parent PID:  {}", p);
-                }
-
-                if !pid_summary.child_pids.is_empty() {
-                    print!("  Child PIDs:  ");
-
-                    let mut child_pid_iter = pid_summary.child_pids.iter().enumerate().peekable();
-                    while let Some((i, n)) = child_pid_iter.next() {
-                        if i % 10 == 0 && i != 0 {
-                            print!("\n               ");
-                        }
-                        if child_pid_iter.peek().is_some() {
-                            print!("{}, ", n);
-                        } else {
-                            print!("{}", n);
-                        }
-                    }
-                    println!();
-                }
-
-                if let Some(pid_files) = file_lines.get(&pid) {
+                if let Some(pid_files) = file_times.get(&pid) {
                     if !pid_files.is_empty() {
-                        println!("\n  Slowest file access times for PID {}:\n", pid);
+                        println!("  Slowest file access times for PID {}:\n", pid);
                         println!(
                             "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
                             "open (ms)", "timestamp", "error", "   file name"
@@ -339,7 +268,6 @@ impl<'a> SessionSummary<'a> {
                         }
                     }
                 }
-
                 println!();
             } else {
                 println!("PID {} not found", pid);
@@ -350,22 +278,6 @@ impl<'a> SessionSummary<'a> {
     pub fn pids(&self) -> Vec<Pid> {
         let pids: Vec<_> = self.pid_summaries.keys().cloned().collect();
         pids
-    }
-
-    fn print_execve(&self, execve: &[&str]) {
-        let cmd_quoted = match execve.get(0) {
-            Some(c) => c[..c.len() - 1].to_string(),
-            None => String::new(),
-        };
-        let cmd = cmd_quoted.replace("\"", "");
-
-        let args = execve
-            .iter()
-            .skip(2)
-            .fold("[".to_string(), |s, a| s + a + " ");
-
-        println!("  Program Executed: {}", cmd);
-        println!("  Args: {}\n", args);
     }
 }
 
