@@ -1,9 +1,9 @@
 use chrono::Duration;
-use crate::file_data::FileData;
+use crate::file_data;
 use crate::pid_summary::{PrintAmt, PrintOptions};
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{Pid, PidSummary, SortBy};
+use crate::{Pid, PidSummary, PidsToPrint, SortBy};
 use fnv::{FnvHashMap, FnvHashSet};
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
@@ -40,7 +40,7 @@ pub struct SessionSummary<'a> {
 impl<'a> SessionSummary<'a> {
     pub fn from_syscall_stats(
         session_stats: &FnvHashMap<Pid, Vec<SyscallStats<'a>>>,
-        pid_data: &FnvHashMap<Pid, PidData<'a>>,
+        pid_data: &'a FnvHashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary {
             pid_summaries: FnvHashMap::default(),
@@ -161,7 +161,7 @@ impl<'a> SessionSummary<'a> {
         pid_graph
     }
 
-    pub fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
+    fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
         let mut related_pids = Vec::new();
 
         for pid in pids {
@@ -178,6 +178,19 @@ impl<'a> SessionSummary<'a> {
         }
 
         related_pids
+    }
+
+    fn validate_pids(&self, pids: &[Pid]) -> Vec<Pid> {
+        let (valid_pids, invalid_pids): (Vec<Pid>, Vec<Pid>) = pids
+            .iter()
+            .cloned()
+            .partition(|p| self.pid_summaries.get(p).is_some());
+
+        for pid in invalid_pids {
+            println!("No data found for PID {}", pid);
+        }
+
+        valid_pids
     }
 
     pub fn print_summary(&self, elapsed_time: Option<Duration>, mut count: usize, sort_by: SortBy) {
@@ -244,7 +257,21 @@ impl<'a> SessionSummary<'a> {
         }
     }
 
-    pub fn print_pid_details(&self, pids: &[Pid], file_times: &FnvHashMap<Pid, Vec<FileData<'a>>>) {
+    pub fn print_pid_details(
+        &self,
+        pids_to_print: PidsToPrint,
+        raw_data: &FnvHashMap<Pid, PidData<'a>>,
+    ) {
+        let pids = match pids_to_print {
+            PidsToPrint::Listed(unchecked_pids) => self.validate_pids(&unchecked_pids),
+            PidsToPrint::Related(unchecked_pids) => {
+                let valid_pids = self.validate_pids(&unchecked_pids);
+                self.related_pids(&valid_pids)
+            }
+        };
+
+        let file_times = file_data::files_opened(raw_data, &pids);
+
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 println!("\nPID {}", pid);

@@ -21,9 +21,13 @@ type Pid = i32;
 pub enum PrintMode {
     Top,
     Stats,
-    RelatedPids(Vec<Pid>),
-    SomePids(Vec<Pid>),
+    Pid(PidsToPrint),
     Histogram((String, Option<Vec<Pid>>)),
+}
+
+pub enum PidsToPrint {
+    Listed(Vec<Pid>),
+    Related(Vec<Pid>),
 }
 
 fn validate_pid(p: String) -> Result<(), String> {
@@ -46,16 +50,10 @@ fn main() {
         .author("Will Chandler <wchandler@gitlab.com>")
         .about("Summarizes raw strace output")
         .arg(
-            Arg::with_name("top").short("t").long("top").help(
-                "Prints a summary top <COUNT> PIDs, as determined by <SORT> - Default output",
-            ),
-        )
-        .arg(
             Arg::with_name("stats")
                 .short("s")
                 .long("stats")
-                .help("Prints a breakdown of syscall stats for <COUNT> PIDs")
-                .conflicts_with("top"),
+                .help("Prints a breakdown of syscall stats for <COUNT> PIDs"),
         )
         .arg(
             Arg::with_name("histogram")
@@ -64,7 +62,6 @@ fn main() {
                 .takes_value(true)
                 .value_name("SYSCALL")
                 .help("Prints a log\u{2082} scale histogram of the execution times for <SYSCALL>")
-                .conflicts_with("top")
                 .conflicts_with("stats"),
         )
         .arg(
@@ -76,7 +73,6 @@ fn main() {
                 .validator(validate_pid)
                 .help("Print details of one or more specific PIDs")
                 .multiple(true)
-                .conflicts_with("top")
                 .conflicts_with("stats"),
         )
         .arg(
@@ -84,7 +80,6 @@ fn main() {
                 .short("r")
                 .long("related")
                 .help("With `--pid`, will print details of parent and child PIDs of <PID>")
-                .conflicts_with("top")
                 .conflicts_with("stats")
                 .requires("pid"),
         )
@@ -94,7 +89,7 @@ fn main() {
                 .long("count")
                 .takes_value(true)
                 .value_name("COUNT")
-                .default_value_ifs(&[("top", None, "25"), ("stats", None, "5")])
+                .default_value_if("stats", None, "5")
                 .help("The number of PIDs to print")
                 .validator(validate_count),
         )
@@ -104,7 +99,7 @@ fn main() {
                 .long("sort")
                 .value_name("SORT_BY")
                 .possible_values(&["active_time", "children", "pid", "syscalls", "total_time"])
-                .default_value_ifs(&[("stats", None, "active_time")])
+                //.default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
                 .help("Field to sort results by"),
         )
@@ -130,14 +125,14 @@ fn main() {
                 .map(|p| p.parse::<Pid>().unwrap())
                 .collect();
             if matches.is_present("related") {
-                PrintMode::RelatedPids(pids)
+                PrintMode::Pid(PidsToPrint::Related(pids))
             } else if matches.is_present("histogram") {
                 PrintMode::Histogram((
                     matches.value_of("histogram").unwrap().to_string(),
                     Some(pids),
                 ))
             } else {
-                PrintMode::SomePids(pids)
+                PrintMode::Pid(PidsToPrint::Listed(pids))
             }
         } else {
             if matches.is_present("stats") {
@@ -190,20 +185,10 @@ fn main() {
     match print_mode {
         PrintMode::Top => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
         PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
-        PrintMode::RelatedPids(pids) => {
-            let related_pids = session_summary.related_pids(&pids);
-            let file_lines = file_data::files_opened(&syscall_data, &related_pids);
-
-            session_summary.print_pid_details(&related_pids, &file_lines);
-        }
-        PrintMode::SomePids(pids) => {
-            let file_lines = file_data::files_opened(&syscall_data, &pids);
-
-            session_summary.print_pid_details(&pids, &file_lines);
-        }
+        PrintMode::Pid(pids) => session_summary.print_pid_details(pids, &syscall_data),
         PrintMode::Histogram((syscall, pids)) => {
-            if let Some(p) = pids {
-                histogram::print_histogram(&syscall, &p, &syscall_data);
+            if let Some(pids) = pids {
+                histogram::print_histogram(&syscall, &pids, &syscall_data);
             } else {
                 histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data);
             }

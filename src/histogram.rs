@@ -28,11 +28,11 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &FnvHashMap<Pi
 
     for (pow, count) in distribution.iter() {
         println!(
-            "    {0: >10} -> {1: <10}\t{2: >10}\t|{3: <40}|",
-            if *pow == 0 { 0 } else { 2u64.pow(*pow as u32) },
-            2u64.pow(*pow + 1 as u32) - 1,
-            *count,
-            dist_marker((*count as f32 / max as f32) * 40.0),
+            "    {low_pow: >10} -> {high_pow: <10}\t{ct: >10}\t|{bar: <40}|",
+            low_pow = if *pow == 0 { 0 } else { 2u64.pow(*pow as u32) },
+            high_pow = 2u64.pow(*pow + 1 as u32) - 1,
+            ct = *count,
+            bar = dist_marker((*count as f32 / max as f32) * 40.0),
         );
     }
     println!();

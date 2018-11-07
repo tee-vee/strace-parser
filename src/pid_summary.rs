@@ -80,28 +80,25 @@ impl<'a> PidSummary<'a> {
 
     fn print_execve(&self) {
         if let Some(execve) = &self.execve {
-            if execve.len() < 7 {
-                println!("Unexpectedtly short execve");
+            let cmd_quoted = if let Some(c) = execve.get(0) {
+                let mut raw_cmd = c.to_string();
+                raw_cmd.pop();
+                raw_cmd
+            } else {
                 return;
-            }
-
-            let cmd_quoted = match execve.get(0) {
-                Some(c) => c[..c.len() - 1].to_string(),
-                None => String::new(),
             };
             let cmd = cmd_quoted.replace("\"", "");
 
-            let args = if execve.len() == 7 {
-                // No args passed, e.g. "ls"
-                execve
-                    .iter()
-                    .skip(2)
-                    .fold(String::new(), |s, a| s + a + " ")
-            } else {
+            let args = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
                 execve
                     .iter()
                     .skip(2)
                     .fold("[".to_string(), |s, a| s + a + " ")
+            } else {
+                execve
+                    .iter()
+                    .skip(2)
+                    .fold(String::new(), |s, a| s + a + " ")
             };
 
             println!("  Program Executed: {}", cmd);
