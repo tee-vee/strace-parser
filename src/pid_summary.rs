@@ -1,6 +1,5 @@
 use crate::syscall_stats::SyscallStats;
 use crate::Pid;
-use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Clone)]
@@ -10,7 +9,6 @@ pub struct PidSummary<'a> {
     pub wait_time: f32,
     pub total_time: f32,
     pub syscall_stats: Vec<SyscallStats<'a>>,
-    pub files: BTreeSet<&'a str>,
     pub parent_pid: Option<Pid>,
     pub child_pids: Vec<Pid>,
     pub execve: Option<Vec<&'a str>>,
@@ -19,7 +17,6 @@ pub struct PidSummary<'a> {
 pub struct PrintOptions {
     pub execve: Option<PrintAmt>,
     pub related_pids: Option<PrintAmt>,
-    pub files: Option<PrintAmt>,
 }
 
 pub enum PrintAmt {
@@ -71,10 +68,6 @@ impl<'a> PidSummary<'a> {
 
         if let Some(p) = print_options.related_pids {
             self.print_related_pids(p);
-        }
-
-        if let Some(p) = print_options.files {
-            self.print_files(p);
         }
     }
 
@@ -143,33 +136,6 @@ impl<'a> PidSummary<'a> {
                 }
                 println!();
             }
-        }
-
-        if !self.files.is_empty() && (self.parent_pid.is_some() || !self.child_pids.is_empty()) {
-            println!();
-        }
-    }
-
-    fn print_files(&self, print_amt: PrintAmt) {
-        if !self.files.is_empty() {
-            println!("  Files opened:");
-
-            let print_ct = match print_amt {
-                PrintAmt::All => self.files.len(),
-                PrintAmt::Some(c) => c,
-            };
-
-            if self.files.len() > print_ct {
-                for f in self.files.iter().take(print_ct) {
-                    println!("    {}", f);
-                }
-                println!("    And {} more...", self.files.len() - print_ct);
-            } else {
-                for f in self.files.iter() {
-                    println!("    {}", f);
-                }
-            }
-            println!();
         }
     }
 }

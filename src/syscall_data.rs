@@ -3,7 +3,7 @@ use crate::parser::RawData;
 use crate::Pid;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
@@ -23,7 +23,6 @@ impl<'a> SyscallData<'a> {
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: FnvHashMap<&'a str, SyscallData<'a>>,
-    pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<&'a str>>,
@@ -33,7 +32,6 @@ impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
             syscall_data: FnvHashMap::default(),
-            files: BTreeSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             execve: None,
@@ -67,10 +65,6 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
 
     if let Some(length) = raw_data.length {
         syscall_entry.lengths.push(length);
-    }
-
-    if let Some(file) = raw_data.file {
-        pid_entry.files.insert(file);
     }
 
     if let Some(error) = raw_data.error {
@@ -114,8 +108,6 @@ fn coalesce_pid_data<'a>(
                 *error_entry += count;
             }
         }
-
-        pid_entry.files.extend(temp_pid_data.files.into_iter());
 
         pid_entry
             .child_pids
@@ -175,13 +167,6 @@ mod tests {
 2690  00:09:47.790444 <... futex resumed> ) = -1 EAGAIN (Resource temporarily unavailable) <0.000025>"##.to_string();
         let pid_data_map = build_syscall_data(&input);
         assert!(pid_data_map.contains_key(&826))
-    }
-
-    #[test]
-    fn syscall_data_unfinished_open_file_captured() {
-        let input = r##"817   00:09:58.951745 open("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb", O_RDONLY|O_NONBLOCK|O_CLOEXEC <unfinished ...>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
-        assert!(pid_data_map[&817].files.contains("/opt/gitlab/embedded/service/gitlab-rails/vendor/active_record/associations/preloader/belongs_to.rb"));
     }
 
     #[test]

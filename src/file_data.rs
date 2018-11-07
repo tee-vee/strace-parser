@@ -62,7 +62,7 @@ pub fn files_opened<'a>(
             coalesced_data.par_sort_by(|x, y| {
                 (&y.length)
                     .partial_cmp(&x.length)
-                    .expect("Invalid comparison wben sorting file access times")
+                    .expect("Invalid comparison when sorting file access times")
             });
             (*pid, coalesced_data)
         })
