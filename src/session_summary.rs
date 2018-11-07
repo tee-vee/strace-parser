@@ -76,7 +76,6 @@ impl<'a> SessionSummary<'a> {
                     wait_time,
                     total_time,
                     syscall_stats: syscall_stats.clone(),
-                    files: pid_data[&pid].files.clone(),
                     parent_pid: None,
                     child_pids: pid_data[&pid].child_pids.clone(),
                     execve: pid_data[&pid].execve.clone(),
@@ -252,7 +251,6 @@ impl<'a> SessionSummary<'a> {
             pid_summary.print(PrintOptions {
                 execve: Some(PrintAmt::All),
                 related_pids: Some(PrintAmt::Some(PRINT_COUNT)),
-                files: Some(PrintAmt::Some(PRINT_COUNT)),
             });
         }
     }
@@ -278,11 +276,13 @@ impl<'a> SessionSummary<'a> {
                 pid_summary.print(PrintOptions {
                     execve: Some(PrintAmt::All),
                     related_pids: Some(PrintAmt::All),
-                    files: None,
                 });
 
                 if let Some(pid_files) = file_times.get(&pid) {
                     if !pid_files.is_empty() {
+                        if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
+                            println!();
+                        }
                         println!("  Slowest file access times for PID {}:\n", pid);
                         println!(
                             "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
@@ -364,19 +364,6 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 5000.0);
-    }
-
-    #[test]
-    fn pid_summary_files_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
-566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
-566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
-566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
-        let syscall_stats = build_syscall_stats(&pid_data_map);
-        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        assert!(summary.pid_summaries[&566].files.contains("/proc/net/unix"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ use criterion::Criterion;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 type Pid = i32;
 
@@ -96,7 +96,6 @@ impl<'a> SyscallData<'a> {
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: FnvHashMap<&'a str, SyscallData<'a>>,
-    pub files: BTreeSet<&'a str>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<&'a str>>,
@@ -106,7 +105,6 @@ impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
             syscall_data: FnvHashMap::default(),
-            files: BTreeSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             execve: None,
@@ -244,10 +242,6 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
         syscall_entry.lengths.push(length);
     }
 
-    if let Some(file) = raw_data.file {
-        pid_entry.files.insert(file);
-    }
-
     if let Some(error) = raw_data.error {
         let error_entry = syscall_entry.errors.entry(error).or_insert(0);
         *error_entry += 1;
@@ -289,8 +283,6 @@ fn coalesce_pid_data<'a>(
                 *error_entry += count;
             }
         }
-
-        pid_entry.files.extend(temp_pid_data.files.into_iter());
 
         pid_entry
             .child_pids

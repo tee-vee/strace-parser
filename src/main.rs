@@ -99,7 +99,6 @@ fn main() {
                 .long("sort")
                 .value_name("SORT_BY")
                 .possible_values(&["active_time", "children", "pid", "syscalls", "total_time"])
-                //.default_value_ifs(&[("stats", None, "active_time")])
                 .takes_value(true)
                 .help("Field to sort results by"),
         )
