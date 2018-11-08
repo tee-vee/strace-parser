@@ -13,7 +13,7 @@ pub struct SyscallStats<'a> {
     max: f32,
     avg: f32,
     min: f32,
-    errors: BTreeMap<&'a str, i32>,
+    errors: FnvHashMap<&'a str, i32>,
 }
 
 impl<'a> fmt::Display for SyscallStats<'a> {
@@ -24,8 +24,10 @@ impl<'a> fmt::Display for SyscallStats<'a> {
             self.name, self.count, self.total, self.max, self.avg, self.min
         )?;
 
-        for (err, count) in self.errors.iter() {
-            write!(f, "{}: {}    ", err, count)?;
+        let sorted_errs: BTreeMap<_, _> = self.errors.iter().collect();
+
+        for (err, count) in sorted_errs.iter() {
+            write!(f, "{}: {}   ", err, count)?;
         }
 
         Ok(())

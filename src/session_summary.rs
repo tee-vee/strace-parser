@@ -146,7 +146,7 @@ impl<'a> SessionSummary<'a> {
         sorted_summaries
     }
 
-    fn build_pid_graph(&self) -> GraphMap<Pid, i32, Directed> {
+    fn build_pid_graph(&self) -> GraphMap<Pid, Pid, Directed> {
         let mut pid_graph = DiGraphMap::new();
 
         for (pid, pid_summary) in self.pid_summaries.iter() {
@@ -252,6 +252,11 @@ impl<'a> SessionSummary<'a> {
                 execve: Some(PrintAmt::All),
                 related_pids: Some(PrintAmt::Some(PRINT_COUNT)),
             });
+
+            println!();
+            if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
+                println!();
+            }
         }
     }
 
@@ -296,8 +301,6 @@ impl<'a> SessionSummary<'a> {
                     }
                 }
                 println!();
-            } else {
-                println!("PID {} not found", pid);
             }
         }
     }
