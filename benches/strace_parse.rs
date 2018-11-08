@@ -7,7 +7,6 @@ use criterion::Criterion;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::BTreeMap;
 
 type Pid = i32;
 
@@ -81,14 +80,14 @@ enum CallStatus {
 #[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
-    pub errors: BTreeMap<&'a str, Pid>,
+    pub errors: FnvHashMap<&'a str, Pid>,
 }
 
 impl<'a> SyscallData<'a> {
     pub fn new() -> SyscallData<'a> {
         SyscallData {
             lengths: Vec::new(),
-            errors: BTreeMap::new(),
+            errors: FnvHashMap::default(),
         }
     }
 }

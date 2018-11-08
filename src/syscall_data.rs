@@ -3,19 +3,18 @@ use crate::parser::RawData;
 use crate::Pid;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
-    pub errors: BTreeMap<&'a str, Pid>,
+    pub errors: FnvHashMap<&'a str, Pid>,
 }
 
 impl<'a> SyscallData<'a> {
     pub fn new() -> SyscallData<'a> {
         SyscallData {
             lengths: Vec::new(),
-            errors: BTreeMap::new(),
+            errors: FnvHashMap::default(),
         }
     }
 }
@@ -58,6 +57,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
     let pid_entry = pid_data_map
         .entry(raw_data.pid)
         .or_insert_with(PidData::new);
+
     let syscall_entry = pid_entry
         .syscall_data
         .entry(raw_data.syscall)
@@ -93,6 +93,7 @@ fn coalesce_pid_data<'a>(
 ) {
     for (pid, temp_pid_data) in temp_map.into_iter() {
         let pid_entry = pid_data_map.entry(pid).or_insert_with(PidData::new);
+
         for (syscall, temp_syscall_data) in temp_pid_data.syscall_data {
             let syscall_entry = pid_entry
                 .syscall_data
