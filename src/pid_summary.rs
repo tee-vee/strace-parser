@@ -30,23 +30,23 @@ impl<'a> fmt::Display for PidSummary<'a> {
             f,
             "{} syscalls, active time: {:.3}ms, total time: {:.3}ms\n",
             self.syscall_count, self.active_time, self.total_time
-        );
+        )?;
         writeln!(
             f,
             "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: <8}",
             "", "", "total", "max", "avg", "min", ""
-        );
+        )?;
         writeln!(
             f,
             "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: >4}",
             "syscall", "count", "(ms)", "(ms)", "(ms)", "(ms)", "errors"
-        );
+        )?;
         writeln!(
             f,
             "  ---------------\t--------\t----------\t----------\t----------\t----------\t--------"
-        );
+        )?;
         for s in &self.syscall_stats {
-            writeln!(f, "{}", s);
+            writeln!(f, "{}", s)?;
         }
 
         Ok(())
