@@ -3,8 +3,7 @@ use crate::file_data;
 use crate::pid_summary::{PrintAmt, PrintOptions};
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{Pid, PidSummary, PidsToPrint, SortBy};
-use fnv::{FnvHashMap, FnvHashSet};
+use crate::{Pid, PidSummary, PidsToPrint, RayonFnvHashMap, RayonFnvHashSet, SortBy};
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -12,8 +11,8 @@ use rayon::prelude::*;
 static PRINT_COUNT: usize = 10;
 
 lazy_static! {
-    static ref WAIT_SYSCALLS: FnvHashSet<&'static str> = {
-        let mut s = FnvHashSet::default();
+    static ref WAIT_SYSCALLS: RayonFnvHashSet<&'static str> = {
+        let mut s = RayonFnvHashSet::default();
         s.insert("epoll_ctl");
         s.insert("epoll_wait");
         s.insert("epoll_pwait");
@@ -32,18 +31,18 @@ lazy_static! {
 }
 
 pub struct SessionSummary<'a> {
-    pid_summaries: FnvHashMap<Pid, PidSummary<'a>>,
+    pid_summaries: RayonFnvHashMap<Pid, PidSummary<'a>>,
     all_time: f32,
     all_active_time: f32,
 }
 
 impl<'a> SessionSummary<'a> {
     pub fn from_syscall_stats(
-        session_stats: &FnvHashMap<Pid, Vec<SyscallStats<'a>>>,
-        pid_data: &'a FnvHashMap<Pid, PidData<'a>>,
+        session_stats: &RayonFnvHashMap<Pid, Vec<SyscallStats<'a>>>,
+        pid_data: &'a RayonFnvHashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary {
-            pid_summaries: FnvHashMap::default(),
+            pid_summaries: RayonFnvHashMap::default(),
             all_time: 0.0,
             all_active_time: 0.0,
         };
@@ -263,7 +262,7 @@ impl<'a> SessionSummary<'a> {
     pub fn print_pid_details(
         &self,
         pids_to_print: PidsToPrint,
-        raw_data: &FnvHashMap<Pid, PidData<'a>>,
+        raw_data: &RayonFnvHashMap<Pid, PidData<'a>>,
     ) {
         let pids = match pids_to_print {
             PidsToPrint::Listed(unchecked_pids) => self.validate_pids(&unchecked_pids),
