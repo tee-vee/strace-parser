@@ -1,9 +1,9 @@
 use crate::syscall_data::PidData;
 use crate::Pid;
-use fnv::FnvHashMap;
+use crate::RayonFxHashMap;
 use std::collections::BTreeMap;
 
-pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &FnvHashMap<Pid, PidData>) {
+pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &RayonFxHashMap<Pid, PidData>) {
     let distribution = build_distribution(syscall, pids, syscall_data);
 
     let pid_list = build_pid_list(pids);
@@ -41,7 +41,7 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &FnvHashMap<Pi
 fn build_distribution(
     syscall: &str,
     pids: &[Pid],
-    syscall_data: &FnvHashMap<Pid, PidData>,
+    syscall_data: &RayonFxHashMap<Pid, PidData>,
 ) -> BTreeMap<u32, i32> {
     let mut distribution = BTreeMap::new();
     let mut max_pow = 0;
