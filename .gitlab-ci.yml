@@ -17,6 +17,6 @@ test:cargo:
   - cargo test --all --verbose
   - RUSTFLAGS="-Z sanitizer=address" cargo test --target x86_64-unknown-linux-gnu
   - RUSTFLAGS="-Z sanitizer=leak" cargo test --target x86_64-unknown-linux-gnu
-  - RUST_TEST_THREADS=1 RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
+  - RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
 #  - RUSTFLAGS="-Z sanitizer=memory" cargo test --target x86_64-unknown-linux-gnu
 ## Memsan finds a problem with 'cargo test', will always fail
