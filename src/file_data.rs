@@ -2,7 +2,7 @@ use chrono::NaiveTime;
 use crate::parser::RawData;
 use crate::syscall_data::PidData;
 use crate::Pid;
-use fnv::FnvHashMap;
+use crate::RayonFxHashMap;
 use rayon::prelude::*;
 use std::fmt;
 
@@ -49,10 +49,10 @@ impl<'a> fmt::Display for FileData<'a> {
 }
 
 pub fn files_opened<'a>(
-    raw_data: &FnvHashMap<Pid, PidData<'a>>,
+    raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
     pids: &[Pid],
-) -> FnvHashMap<Pid, Vec<FileData<'a>>> {
-    let pid_data: FnvHashMap<_, _> = pids
+) -> RayonFxHashMap<Pid, Vec<FileData<'a>>> {
+    let pid_data: RayonFxHashMap<_, _> = pids
         .iter()
         .map(|pid| {
             let mut open_events = raw_data[pid].open_events.clone();

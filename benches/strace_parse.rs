@@ -1,14 +1,15 @@
 #[macro_use]
 extern crate criterion;
-extern crate rayon;
 
 use chrono::NaiveTime;
 use criterion::Criterion;
-use fnv::FnvHashMap;
+use fxhash::FxBuildHasher;
 use rayon::prelude::*;
+use rayon_hash::HashMap;
 use smallvec::SmallVec;
 
 type Pid = i32;
+type RayonFxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
@@ -80,21 +81,21 @@ enum CallStatus {
 #[derive(Clone, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
-    pub errors: FnvHashMap<&'a str, Pid>,
+    pub errors: RayonFxHashMap<&'a str, Pid>,
 }
 
 impl<'a> SyscallData<'a> {
     pub fn new() -> SyscallData<'a> {
         SyscallData {
             lengths: Vec::new(),
-            errors: FnvHashMap::default(),
+            errors: RayonFxHashMap::default(),
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
-    pub syscall_data: FnvHashMap<&'a str, SyscallData<'a>>,
+    pub syscall_data: RayonFxHashMap<&'a str, SyscallData<'a>>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<&'a str>>,
@@ -103,7 +104,7 @@ pub struct PidData<'a> {
 impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
-            syscall_data: FnvHashMap::default(),
+            syscall_data: RayonFxHashMap::default(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             execve: None,
@@ -209,11 +210,11 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     RawData::from_strs(pid, time, syscall, length, file, error, child_pid, execve)
 }
 
-pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
+pub fn build_syscall_data<'a>(buffer: &'a str) -> RayonFxHashMap<Pid, PidData<'a>> {
     buffer
         .par_lines()
         .fold(
-            || FnvHashMap::default(),
+            || RayonFxHashMap::default(),
             |mut pid_data_map, line| {
                 if let Some(raw_data) = parse_line(line) {
                     add_syscall_data(&mut pid_data_map, raw_data);
@@ -222,7 +223,7 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
             },
         )
         .reduce(
-            || FnvHashMap::default(),
+            || RayonFxHashMap::default(),
             |mut pid_data_map, temp_map| {
                 coalesce_pid_data(&mut pid_data_map, temp_map);
                 pid_data_map
@@ -230,7 +231,10 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> FnvHashMap<Pid, PidData<'a>> {
         )
 }
 
-fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_data: RawData<'a>) {
+fn add_syscall_data<'a>(
+    pid_data_map: &mut RayonFxHashMap<Pid, PidData<'a>>,
+    raw_data: RawData<'a>,
+) {
     let pid_entry = pid_data_map.entry(raw_data.pid).or_insert(PidData::new());
     let syscall_entry = pid_entry
         .syscall_data
@@ -262,8 +266,8 @@ fn add_syscall_data<'a>(pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>, raw_dat
 }
 
 fn coalesce_pid_data<'a>(
-    pid_data_map: &mut FnvHashMap<Pid, PidData<'a>>,
-    temp_map: FnvHashMap<Pid, PidData<'a>>,
+    pid_data_map: &mut RayonFxHashMap<Pid, PidData<'a>>,
+    temp_map: RayonFxHashMap<Pid, PidData<'a>>,
 ) {
     for (pid, temp_pid_data) in temp_map.into_iter() {
         let pid_entry = pid_data_map.entry(pid).or_insert(PidData::new());
