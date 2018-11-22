@@ -2,7 +2,7 @@ use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use self::sort_by::SortBy;
 use clap::{App, Arg};
-use fnv::FnvBuildHasher;
+use fxhash::FxBuildHasher;
 use rayon_hash::{HashMap, HashSet};
 use std::fs::File;
 use std::io::prelude::*;
@@ -18,8 +18,8 @@ mod syscall_data;
 mod syscall_stats;
 
 type Pid = i32;
-type RayonFnvHashMap<K, V> = HashMap<K, V, FnvBuildHasher>;
-type RayonFnvHashSet<T> = HashSet<T, FnvBuildHasher>;
+type RayonFxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
+type RayonFxHashSet<T> = HashSet<T, FxBuildHasher>;
 
 pub enum PrintMode {
     Top,
@@ -121,7 +121,7 @@ fn main() {
 
     let print_mode = {
         if matches.is_present("pid") {
-            let pid_strs: RayonFnvHashSet<_> = matches.values_of("pid").unwrap().collect();
+            let pid_strs: RayonFxHashSet<_> = matches.values_of("pid").unwrap().collect();
             let pids: Vec<_> = pid_strs
                 .into_iter()
                 .map(|p| p.parse::<Pid>().unwrap())
