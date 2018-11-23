@@ -1,6 +1,7 @@
 use crate::syscall_stats::SyscallStats;
 use crate::Pid;
 use std::fmt;
+use std::io::{prelude::*, stdout, Error};
 
 #[derive(Clone)]
 pub struct PidSummary<'a> {
@@ -54,31 +55,32 @@ impl<'a> fmt::Display for PidSummary<'a> {
 }
 
 impl<'a> PidSummary<'a> {
-    pub fn print(&self, print_options: PrintOptions) {
+    pub fn print(&self, print_options: PrintOptions) -> Result<(), Error> {
         if self.syscall_count == 0 {
-            return;
+            return Ok(());
         }
 
-        print!("{}", self);
-        println!("  ---------------\n");
+        write!(stdout(), "{}", self)?;
+        writeln!(stdout(), "  ---------------\n")?;
 
         if print_options.execve.is_some() {
-            self.print_execve();
+            self.print_execve()?;
         }
 
         if let Some(p) = print_options.related_pids {
-            self.print_related_pids(p);
+            self.print_related_pids(p)?;
         }
+        Ok(())
     }
 
-    fn print_execve(&self) {
+    fn print_execve(&self) -> Result<(), Error> {
         if let Some(execve) = &self.execve {
             let cmd_quoted = if let Some(c) = execve.get(0) {
                 let mut raw_cmd = c.to_string();
                 raw_cmd.pop();
                 raw_cmd
             } else {
-                return;
+                return Ok(());
             };
             let cmd = cmd_quoted.replace("\"", "");
 
@@ -94,14 +96,15 @@ impl<'a> PidSummary<'a> {
                     .fold(String::new(), |s, a| s + a + " ")
             };
 
-            println!("  Program Executed: {}", cmd);
-            println!("  Args: {}\n", args);
+            writeln!(stdout(), "  Program Executed: {}", cmd)?;
+            writeln!(stdout(), "  Args: {}\n", args)?;
         }
+        Ok(())
     }
 
-    fn print_related_pids(&self, print_amt: PrintAmt) {
+    fn print_related_pids(&self, print_amt: PrintAmt) -> Result<(), Error> {
         if let Some(p) = self.parent_pid {
-            println!("  Parent PID:  {}", p);
+            writeln!(stdout(), "  Parent PID:  {}", p)?;
         }
 
         if !self.child_pids.is_empty() {
@@ -109,33 +112,35 @@ impl<'a> PidSummary<'a> {
                 PrintAmt::All => self.child_pids.len(),
                 PrintAmt::Some(c) => c,
             };
-            print!("  Child PIDs:  ");
+            write!(stdout(), "  Child PIDs:  ")?;
             if self.child_pids.len() > print_ct {
                 for (i, p) in self.child_pids.iter().enumerate().take(print_ct) {
                     if i % 10 == 0 && i != 0 {
-                        print!("\n               ");
+                        write!(stdout(), "\n               ")?;
                     }
                     if i != print_ct - 1 {
-                        print!("{}, ", p);
+                        write!(stdout(), "{}, ", p)?;
                     } else {
-                        print!("{} ", p);
+                        write!(stdout(), "{} ", p)?;
                     }
                 }
-                println!("and {} more...", self.child_pids.len() - print_ct);
+                writeln!(stdout(), "and {} more...", self.child_pids.len() - print_ct)?;
             } else {
                 let mut child_pid_iter = self.child_pids.iter().enumerate().peekable();
                 while let Some((i, n)) = child_pid_iter.next() {
                     if i % 10 == 0 && i != 0 {
-                        print!("\n               ");
+                        write!(stdout(), "\n               ")?;
                     }
                     if child_pid_iter.peek().is_some() {
-                        print!("{}, ", n);
+                        write!(stdout(), "{}, ", n)?;
                     } else {
-                        print!("{}", n);
+                        write!(stdout(), "{}", n)?;
                     }
                 }
-                println!();
+                writeln!(stdout())?;
             }
         }
+
+        Ok(())
     }
 }

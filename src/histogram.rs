@@ -2,8 +2,13 @@ use crate::syscall_data::PidData;
 use crate::Pid;
 use crate::RayonFxHashMap;
 use std::collections::BTreeMap;
+use std::io::{prelude::*, stdout, Error};
 
-pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &RayonFxHashMap<Pid, PidData>) {
+pub fn print_histogram(
+    syscall: &str,
+    pids: &[Pid],
+    syscall_data: &RayonFxHashMap<Pid, PidData>,
+) -> Result<(), Error> {
     let distribution = build_distribution(syscall, pids, syscall_data);
 
     let pid_list = build_pid_list(pids);
@@ -11,31 +16,42 @@ pub fn print_histogram(syscall: &str, pids: &[Pid], syscall_data: &RayonFxHashMa
     let max = match distribution.values().max() {
         Some(m) => *m,
         None => {
-            println!("No data found for {}", syscall);
-            return;
+            writeln!(stdout(), "No data found for {}", syscall)?;
+            return Ok(());
         }
     };
 
-    println!("\n  syscall: {}\n  pids: {}\n", syscall, pid_list);
-    println!(
+    writeln!(stdout(), "\n  syscall: {}\n  pids: {}\n", syscall, pid_list)?;
+    writeln!(
+        stdout(),
         "    {0: <10}   {1: <10}\t{2: >10}\t {3: <10}",
-        "\u{03BC}secs", "", "count", "distribution",
-    );
-    println!(
+        "\u{03BC}secs",
+        "",
+        "count",
+        "distribution",
+    )?;
+    writeln!(
+        stdout(),
         "    {0: >10}----{1: <10}\t{2: >10}\t {3: <10}",
-        "----------", "----------", "--------", "----------------------------------------",
-    );
+        "----------",
+        "----------",
+        "--------",
+        "----------------------------------------",
+    )?;
 
     for (pow, count) in distribution.iter() {
-        println!(
+        writeln!(
+            stdout(),
             "    {low_pow: >10} -> {high_pow: <10}\t{ct: >10}\t|{bar: <40}|",
             low_pow = if *pow == 0 { 0 } else { 2u64.pow(*pow as u32) },
             high_pow = 2u64.pow(*pow + 1 as u32) - 1,
             ct = *count,
             bar = dist_marker((*count as f32 / max as f32) * 40.0),
-        );
+        )?;
     }
-    println!();
+    writeln!(stdout())?;
+
+    Ok(())
 }
 
 fn build_distribution(
