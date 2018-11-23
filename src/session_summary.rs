@@ -7,6 +7,7 @@ use crate::{Pid, PidSummary, PidsToPrint, RayonFxHashMap, RayonFxHashSet, SortBy
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
+use std::io::{prelude::*, stdout, Error};
 
 static PRINT_COUNT: usize = 10;
 
@@ -178,38 +179,66 @@ impl<'a> SessionSummary<'a> {
         related_pids
     }
 
-    fn validate_pids(&self, pids: &[Pid]) -> Vec<Pid> {
+    fn validate_pids(&self, pids: &[Pid]) -> Result<Vec<Pid>, Error> {
         let (valid_pids, invalid_pids): (Vec<Pid>, Vec<Pid>) = pids
             .iter()
             .cloned()
             .partition(|p| self.pid_summaries.get(p).is_some());
 
         for pid in invalid_pids {
-            println!("No data found for PID {}", pid);
+            writeln!(stdout(), "No data found for PID {}", pid)?;
         }
 
-        valid_pids
+        Ok(valid_pids)
     }
 
-    pub fn print_summary(&self, elapsed_time: Option<Duration>, mut count: usize, sort_by: SortBy) {
+    pub fn print_summary(
+        &self,
+        elapsed_time: Option<Duration>,
+        mut count: usize,
+        sort_by: SortBy,
+    ) -> Result<(), Error> {
         if count > self.pid_summaries.len() {
             count = self.pid_summaries.len()
         }
 
-        println!("\nTop {} PIDs by {}\n-----------\n", count, sort_by);
+        writeln!(
+            stdout(),
+            "\nTop {} PIDs by {}\n-----------\n",
+            count,
+            sort_by
+        )?;
 
-        println!(
+        writeln!(
+            stdout(),
             "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
-            "", "active", "wait", "total", "% of", "", ""
-        );
-        println!(
+            "",
+            "active",
+            "wait",
+            "total",
+            "% of",
+            "",
+            ""
+        )?;
+        writeln!(
+            stdout(),
             "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
-            "pid", "(ms)", "(ms)", "(ms)", "actv time", "syscalls", "children"
-        );
-        println!("  -------\t----------\t----------\t----------\t---------\t---------\t---------");
+            "pid",
+            "(ms)",
+            "(ms)",
+            "(ms)",
+            "actv time",
+            "syscalls",
+            "children"
+        )?;
+        writeln!(
+            stdout(),
+            "  -------\t----------\t----------\t----------\t---------\t---------\t---------"
+        )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
-            println!(
+            writeln!(
+                stdout(),
                 "  {: <7}\t{: >10.3}\t{: >10.3}\t{: >10.3}\t{: >8.2}%\t{: >9}\t{: >9}",
                 pid,
                 pid_summary.active_time,
@@ -218,56 +247,63 @@ impl<'a> SessionSummary<'a> {
                 pid_summary.active_time / self.all_active_time * 100.0,
                 pid_summary.syscall_count,
                 pid_summary.child_pids.len(),
-            );
+            )?;
         }
-        println!("\nTotal PIDs: {}", self.pid_summaries.len());
-        println!("System Time: {:.6}s", self.all_time / 1000.0);
+        writeln!(stdout(), "\nTotal PIDs: {}", self.pid_summaries.len())?;
+        writeln!(stdout(), "System Time: {:.6}s", self.all_time / 1000.0)?;
         if let Some(real_time) = elapsed_time {
-            println!(
+            writeln!(
+                stdout(),
                 "Real Time: {}.{}s",
                 real_time.num_seconds(),
                 real_time.num_milliseconds()
-            );
+            )?;
         }
+
+        Ok(())
     }
 
-    pub fn print_pid_stats(&self, mut count: usize, sort_by: SortBy) {
+    pub fn print_pid_stats(&self, mut count: usize, sort_by: SortBy) -> Result<(), Error> {
         if count > self.pid_summaries.len() {
             count = self.pid_summaries.len()
         }
 
-        println!(
+        writeln!(
+            stdout(),
             "\nDetails of Top {} PIDs by {}\n-----------\n",
-            count, sort_by
-        );
+            count,
+            sort_by
+        )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
             if pid_summary.syscall_count == 0 {
                 continue;
             }
 
-            println!("PID {}", pid);
+            writeln!(stdout(), "PID {}", pid)?;
             pid_summary.print(PrintOptions {
                 execve: Some(PrintAmt::All),
                 related_pids: Some(PrintAmt::Some(PRINT_COUNT)),
-            });
+            })?;
 
-            println!();
+            writeln!(stdout())?;
             if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
-                println!();
+                writeln!(stdout())?;
             }
         }
+
+        Ok(())
     }
 
     pub fn print_pid_details(
         &self,
         pids_to_print: PidsToPrint,
         raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
-    ) {
+    ) -> Result<(), Error> {
         let pids = match pids_to_print {
-            PidsToPrint::Listed(unchecked_pids) => self.validate_pids(&unchecked_pids),
+            PidsToPrint::Listed(unchecked_pids) => self.validate_pids(&unchecked_pids)?,
             PidsToPrint::Related(unchecked_pids) => {
-                let valid_pids = self.validate_pids(&unchecked_pids);
+                let valid_pids = self.validate_pids(&unchecked_pids)?;
                 self.related_pids(&valid_pids)
             }
         };
@@ -276,32 +312,41 @@ impl<'a> SessionSummary<'a> {
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
-                println!("\nPID {}", pid);
+                writeln!(stdout(), "\nPID {}", pid)?;
                 pid_summary.print(PrintOptions {
                     execve: Some(PrintAmt::All),
                     related_pids: Some(PrintAmt::All),
-                });
+                })?;
 
                 if let Some(pid_files) = file_times.get(&pid) {
                     if !pid_files.is_empty() {
                         if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
-                            println!();
+                            writeln!(stdout())?;
                         }
-                        println!("  Slowest file access times for PID {}:\n", pid);
-                        println!(
+                        writeln!(stdout(), "  Slowest file access times for PID {}:\n", pid)?;
+                        writeln!(
+                            stdout(),
                             "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
-                            "open (ms)", "timestamp", "error", "   file name"
-                        );
-                        println!("  ----------\t---------------\t   ---------------\t   ---------");
+                            "open (ms)",
+                            "timestamp",
+                            "error",
+                            "   file name"
+                        )?;
+                        writeln!(
+                            stdout(),
+                            "  ----------\t---------------\t   ---------------\t   ---------"
+                        )?;
 
                         for file in pid_files.iter().take(10) {
-                            println!("{}", file);
+                            writeln!(stdout(), "{}", file)?;
                         }
                     }
                 }
-                println!();
+                writeln!(stdout())?;
             }
         }
+
+        Ok(())
     }
 
     pub fn pids(&self) -> Vec<Pid> {

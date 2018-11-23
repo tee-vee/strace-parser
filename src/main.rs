@@ -184,16 +184,20 @@ fn main() {
 
     let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
 
-    match print_mode {
+    let print_status = match print_mode {
         PrintMode::Top => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
         PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
         PrintMode::Pid(pids) => session_summary.print_pid_details(pids, &syscall_data),
         PrintMode::Histogram((syscall, pids)) => {
             if let Some(pids) = pids {
-                histogram::print_histogram(&syscall, &pids, &syscall_data);
+                histogram::print_histogram(&syscall, &pids, &syscall_data)
             } else {
-                histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data);
+                histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data)
             }
         }
+    };
+
+    if print_status.is_err() {
+        std::process::exit(1);
     }
 }
