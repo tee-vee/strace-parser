@@ -1,19 +1,73 @@
+**Binaries can be downloaded via [Repository -> Tags](https://gitlab.com/wchandler/strace-parser/tags)**
+
 A small tool to analyze raw `strace` data.
 
-It prints the following metrics:
+It can generate the following metrics:
    * A summary of the top processes, including total syscalls and time spent
    * A histogram showing the distribution of execution times for a given syscall
    * Statistics on each type of syscall made for a given number of proccesses
    * Details of a process, including the statistics above as well as slow
         file accesses and a list of child processes
 
-
-**NOTE**: `strace` must be run with `-tt -T -f` flags for the required data
+**NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
 to be captured
 
-Calls like nanosleep and futex can dominate the results, so they are broken 
-out into the `wait` metric, and results are sorted by `active_time` by default.
+### Commands
 
+`strace-parser [FILE] [OPTIONS]`
+
+When no options are passed a summary of the most active PIDS is printed
+
+
+---
+
+`-s, --stats`
+
+Print the details of the syscalls made by `[COUNT]` PIDs, sorted by `[SORT_BY]` (active time by default, can choose another option with `-s, --sort` )
+
+---
+
+`-p, --pid <PID>`
+
+Print the details of a given PID, including syscalls made, slowest `open` times, related PIDs, and programs executed via `execve`.  `-r, --related` can be passed with this option to include details of parent and child PIDs
+
+---
+
+`-r, --related`
+
+With `-p, --pid`, will include the details of any parent and child PIDs in output
+
+---
+
+`-c, --count`
+
+How many PIDS to print
+
+---
+
+`-S, --sort <SORT_BY>`
+
+Which field to use to sort PIDs
+
+
+**Option for <SORT_BY>:**
+```rb
+   active_time   # Time spent by PID on active tasks
+   children   # The number of child PIDs created by PID
+   pid   # PID number
+   syscalls   # The number of syscalls made by the PID
+   total_time   # All time the PID was alive, includes waiting tasks
+```
+
+---
+
+`-h, --histogram <SYSCALL>`
+
+Print a chart displaying the relative frequency of execution times for a given syscall
+
+---
+
+### Example Output
 **Example Summary**:
 
 ```
