@@ -15,11 +15,6 @@ pub struct PidSummary<'a> {
     pub execve: Option<Vec<&'a str>>,
 }
 
-pub struct PrintOptions {
-    pub execve: Option<PrintAmt>,
-    pub related_pids: Option<PrintAmt>,
-}
-
 pub enum PrintAmt {
     All,
     Some(usize),
@@ -55,54 +50,44 @@ impl<'a> fmt::Display for PidSummary<'a> {
 }
 
 impl<'a> PidSummary<'a> {
-    pub fn print(&self, print_options: PrintOptions) -> Result<(), Error> {
-        if self.syscall_count == 0 {
-            return Ok(());
-        }
+    pub fn format_execve(&self) -> Option<(String, String)> {
+        match &self.execve {
+            Some(execve) if execve.get(0).is_some() => {
+                let cmd_quoted = {
+                    let mut raw_cmd = execve[0].to_string();
+                    raw_cmd.pop();
+                    raw_cmd
+                };
+                let cmd = cmd_quoted.replace("\"", "");
 
-        write!(stdout(), "{}", self)?;
-        writeln!(stdout(), "  ---------------\n")?;
+                let args = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
+                    execve
+                        .iter()
+                        .skip(2)
+                        .fold("[".to_string(), |s, a| s + a + " ")
+                } else {
+                    execve
+                        .iter()
+                        .skip(2)
+                        .fold(String::new(), |s, a| s + a + " ")
+                };
 
-        if print_options.execve.is_some() {
-            self.print_execve()?;
+                Some((cmd, args))
+            }
+            _ => None,
         }
-
-        if let Some(p) = print_options.related_pids {
-            self.print_related_pids(p)?;
-        }
-        Ok(())
     }
 
-    fn print_execve(&self) -> Result<(), Error> {
-        if let Some(execve) = &self.execve {
-            let cmd_quoted = if let Some(c) = execve.get(0) {
-                let mut raw_cmd = c.to_string();
-                raw_cmd.pop();
-                raw_cmd
-            } else {
-                return Ok(());
-            };
-            let cmd = cmd_quoted.replace("\"", "");
-
-            let args = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
-                execve
-                    .iter()
-                    .skip(2)
-                    .fold("[".to_string(), |s, a| s + a + " ")
-            } else {
-                execve
-                    .iter()
-                    .skip(2)
-                    .fold(String::new(), |s, a| s + a + " ")
-            };
-
+    pub fn print_exec(&self) -> Result<(), Error> {
+        if let Some((cmd, args)) = self.format_execve() {
             writeln!(stdout(), "  Program Executed: {}", cmd)?;
             writeln!(stdout(), "  Args: {}\n", args)?;
         }
+
         Ok(())
     }
 
-    fn print_related_pids(&self, print_amt: PrintAmt) -> Result<(), Error> {
+    pub fn print_related_pids(&self, print_amt: PrintAmt) -> Result<(), Error> {
         if let Some(p) = self.parent_pid {
             writeln!(stdout(), "  Parent PID:  {}", p)?;
         }
