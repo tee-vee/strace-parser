@@ -1,12 +1,13 @@
-use chrono::Duration;
 use crate::file_data;
-use crate::pid_summary::{PrintAmt, PrintOptions};
+use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{Pid, PidSummary, PidsToPrint, RayonFxHashMap, RayonFxHashSet, SortBy};
+use crate::{Pid, PidPrintAmt, PidSummary, RayonFxHashMap, RayonFxHashSet, SortBy};
+use chrono::Duration;
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
+use std::collections::BTreeSet;
 use std::io::{prelude::*, stdout, Error};
 
 static PRINT_COUNT: usize = 10;
@@ -160,27 +161,27 @@ impl<'a> SessionSummary<'a> {
         pid_graph
     }
 
-    fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
-        let mut related_pids = Vec::new();
+    pub fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
+        let mut related_pids = BTreeSet::new();
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
-                related_pids.push(*pid);
+                related_pids.insert(*pid);
                 if let Some(parent) = pid_summary.parent_pid {
-                    related_pids.push(parent);
+                    related_pids.insert(parent);
                 }
 
                 for child in &pid_summary.child_pids {
-                    related_pids.push(*child);
+                    related_pids.insert(*child);
                 }
             }
         }
 
-        related_pids
+        related_pids.into_iter().collect::<Vec<_>>()
     }
 
-    fn validate_pids(&self, pids: &[Pid]) -> Result<Vec<Pid>, Error> {
-        let (valid_pids, invalid_pids): (Vec<Pid>, Vec<Pid>) = pids
+    pub fn validate_pids(&self, pids: &[Pid]) -> Result<Vec<Pid>, Error> {
+        let (valid_pids, invalid_pids): (BTreeSet<Pid>, BTreeSet<Pid>) = pids
             .iter()
             .cloned()
             .partition(|p| self.pid_summaries.get(p).is_some());
@@ -189,7 +190,7 @@ impl<'a> SessionSummary<'a> {
             writeln!(stdout(), "No data found for PID {}", pid)?;
         }
 
-        Ok(valid_pids)
+        Ok(valid_pids.into_iter().collect::<Vec<_>>())
     }
 
     pub fn print_summary(
@@ -281,15 +282,17 @@ impl<'a> SessionSummary<'a> {
             }
 
             writeln!(stdout(), "PID {}", pid)?;
-            pid_summary.print(PrintOptions {
-                execve: Some(PrintAmt::All),
-                related_pids: Some(PrintAmt::Some(PRINT_COUNT)),
-            })?;
+            writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
-            writeln!(stdout())?;
-            if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
+            if pid_summary.execve.is_some() {
+                writeln!(stdout())?;
+                pid_summary.print_exec()?;
+            } else if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
                 writeln!(stdout())?;
             }
+            pid_summary.print_related_pids(PrintAmt::Some(PRINT_COUNT))?;
+
+            writeln!(stdout(), "\n")?;
         }
 
         Ok(())
@@ -297,33 +300,25 @@ impl<'a> SessionSummary<'a> {
 
     pub fn print_pid_details(
         &self,
-        pids_to_print: PidsToPrint,
+        pids: &[Pid],
         raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let pids = match pids_to_print {
-            PidsToPrint::Listed(unchecked_pids) => self.validate_pids(&unchecked_pids)?,
-            PidsToPrint::Related(unchecked_pids) => {
-                let valid_pids = self.validate_pids(&unchecked_pids)?;
-                self.related_pids(&valid_pids)
-            }
-        };
-
         let file_times = file_data::files_opened(raw_data, &pids);
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 writeln!(stdout(), "\nPID {}", pid)?;
-                pid_summary.print(PrintOptions {
-                    execve: Some(PrintAmt::All),
-                    related_pids: Some(PrintAmt::All),
-                })?;
+                writeln!(stdout(), "{}  ---------------\n", pid_summary)?;
+
+                pid_summary.print_exec()?;
+                pid_summary.print_related_pids(PrintAmt::All)?;
 
                 if let Some(pid_files) = file_times.get(&pid) {
                     if !pid_files.is_empty() {
                         if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
                             writeln!(stdout())?;
                         }
-                        writeln!(stdout(), "  Slowest file access times for PID {}:\n", pid)?;
+                        writeln!(stdout(), "  Slowest file open times for PID {}:\n", pid)?;
                         writeln!(
                             stdout(),
                             "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
@@ -345,6 +340,83 @@ impl<'a> SessionSummary<'a> {
                 writeln!(stdout())?;
             }
         }
+
+        Ok(())
+    }
+
+    pub fn print_exec_list(
+        &self,
+        pids_to_print: &[Pid],
+        print_type: PidPrintAmt,
+    ) -> Result<(), Error> {
+        writeln!(stdout(), "\nPrograms Executed\n")?;
+        writeln!(
+            stdout(),
+            "  {: >7}\t{: ^30}\t{: <}",
+            "pid",
+            "program",
+            "args",
+        )?;
+        writeln!(
+            stdout(),
+            "  --------\t          ---------           \t--------"
+        )?;
+
+        let pids = match print_type {
+            PidPrintAmt::All => self
+                .to_sorted(SortBy::Pid)
+                .iter()
+                .filter(|(_, summary)| summary.execve.is_some())
+                .map(|(pid, _)| *pid)
+                .collect(),
+            _ => pids_to_print.to_owned(),
+        };
+
+        for pid in pids {
+            if let Some(pid_summary) = self.pid_summaries.get(&pid) {
+                if let Some((cmd, args)) = pid_summary.format_execve() {
+                    writeln!(stdout(), "  {: >7}\t{: ^30}\t{: <}", pid, cmd, args)?;
+                }
+            }
+        }
+        writeln!(stdout())?;
+
+        Ok(())
+    }
+
+    pub fn print_opened_files(
+        &self,
+        pids_to_print: &[Pid],
+        raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
+    ) -> Result<(), Error> {
+        let file_times = file_data::files_opened(raw_data, &pids_to_print);
+
+        writeln!(stdout(), "\nFiles Opened\n")?;
+        writeln!(
+            stdout(),
+            "\n  {: >7}\t{: >12}\t{: >15}\t   {: >15}\t{: <30}",
+            "pid",
+            "open (ms)",
+            "timestamp",
+            "error",
+            "   file name"
+        )?;
+        writeln!(
+            stdout(),
+            "  -------\t------------\t---------------\t   ---------------\t   ---------"
+        )?;
+
+        let mut sorted_pids: Vec<_> = file_times.iter().map(|(pid, _)| *pid).collect();
+        sorted_pids.sort();
+
+        for pid in sorted_pids {
+            let files = &file_times[&pid];
+
+            for file in files {
+                writeln!(stdout(), "  {: >7}\t{}", pid, file,)?;
+            }
+        }
+        writeln!(stdout())?;
 
         Ok(())
     }

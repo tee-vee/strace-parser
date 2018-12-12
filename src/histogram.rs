@@ -24,7 +24,7 @@ pub fn print_histogram(
     writeln!(stdout(), "\n  syscall: {}\n  pids: {}\n", syscall, pid_list)?;
     writeln!(
         stdout(),
-        "    {0: <10}   {1: <10}\t{2: >10}\t {3: <10}",
+        "    {0: <4}   {1: <4}\t{2: >10}\t {3: <10}",
         "\u{03BC}secs",
         "",
         "count",
@@ -32,21 +32,35 @@ pub fn print_histogram(
     )?;
     writeln!(
         stdout(),
-        "    {0: >10}----{1: <10}\t{2: >10}\t {3: <10}",
-        "----------",
-        "----------",
+        "    {0: >4}----{1: <4}\t{2: >10}\t {3: <10}",
+        "----",
+        "----",
         "--------",
         "----------------------------------------",
     )?;
 
-    for (pow, count) in distribution.iter() {
+    for (pow, count) in distribution.iter().skip_while(|(_, count)| **count == 0) {
+        let (low, low_suffix) = pow_description(*pow);
+        let (high, high_suffix) = pow_description(*pow + 1);
+
+        let low_desc = match low {
+            0 => 0.to_string(),
+            _ => format!("{}{}", low, low_suffix),
+        };
+
+        let high_desc = if high_suffix.is_empty() {
+            (high - 1).to_string()
+        } else {
+            format!("{}{}", high, high_suffix)
+        };
+
         writeln!(
             stdout(),
-            "    {low_pow: >10} -> {high_pow: <10}\t{ct: >10}\t|{bar: <40}|",
-            low_pow = if *pow == 0 { 0 } else { 2u64.pow(*pow as u32) },
-            high_pow = 2u64.pow(*pow + 1 as u32) - 1,
-            ct = *count,
-            bar = dist_marker((*count as f32 / max as f32) * 40.0),
+            "    {: >4} -> {: <4}\t{: >10}\t|{: <40}|",
+            low_desc,
+            high_desc,
+            *count,
+            build_bar((*count as f32 / max as f32) * 40.0),
         )?;
     }
     writeln!(stdout())?;
@@ -98,6 +112,22 @@ fn fill_empty_pows(distribution: &mut BTreeMap<u32, i32>, max_pow: u32) {
     }
 }
 
+fn pow_description(pow: u32) -> (u32, &'static str) {
+    let number = 1 << (pow % 10);
+
+    let size_suffix = match pow / 10 {
+        0 => "",
+        1 => "K",
+        2 => "M",
+        3 => "G",
+        4 => "T",
+        5 => "P",
+        _ => "Z",
+    };
+
+    (number, size_suffix)
+}
+
 fn build_pid_list(pids: &[Pid]) -> String {
     let mut pid_list = pids
         .iter()
@@ -112,7 +142,7 @@ fn build_pid_list(pids: &[Pid]) -> String {
     pid_list
 }
 
-fn dist_marker(perc: f32) -> String {
+fn build_bar(perc: f32) -> String {
     let mut marker = String::new();
     let count = perc as i32;
     for _ in 0..count {

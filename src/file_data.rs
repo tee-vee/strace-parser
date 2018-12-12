@@ -1,8 +1,8 @@
-use chrono::NaiveTime;
 use crate::parser::RawData;
 use crate::syscall_data::PidData;
 use crate::Pid;
 use crate::RayonFxHashMap;
+use chrono::NaiveTime;
 use rayon::prelude::*;
 use std::fmt;
 

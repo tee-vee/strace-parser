@@ -1,5 +1,5 @@
-use chrono::NaiveTime;
 use crate::Pid;
+use chrono::NaiveTime;
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,7 +125,7 @@ pub fn parse_line(line: &str) -> Option<RawData> {
     if length.is_some() {
         let eq_pos = tokens.iter().rposition(|&t| t == "=");
         if let Some(pos) = eq_pos {
-            if syscall == "clone" {
+            if syscall == "clone" || syscall == "vfork" || syscall == "fork" {
                 if let Some(child_pid_str) = tokens.get(pos + 1).cloned() {
                     child_pid = Some(child_pid_str);
                 }
@@ -376,6 +376,24 @@ mod tests {
                     "vars",
                     "*/])"
                 ])
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_child_pid() {
+        let input = r##"13656 10:53:02.442246 vfork() = 55900 <0.000229>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 13656,
+                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
+                syscall: "vfork",
+                length: Some(0.000229),
+                file: None,
+                error: None,
+                child_pid: Some(55900),
+                execve: None,
             })
         );
     }
