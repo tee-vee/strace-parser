@@ -321,7 +321,7 @@ impl<'a> SessionSummary<'a> {
                         writeln!(stdout(), "  Slowest file open times for PID {}:\n", pid)?;
                         writeln!(
                             stdout(),
-                            "  {:>10}\t{: >15}\t   {: >15}\t{: <30}",
+                            "  {:>10}\t{: >15}\t   {: ^15}\t{: <30}",
                             "open (ms)",
                             "timestamp",
                             "error",
@@ -394,7 +394,7 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nFiles Opened\n")?;
         writeln!(
             stdout(),
-            "\n  {: >7}\t{: >12}\t{: >15}\t   {: >15}\t{: <30}",
+            "\n  {: >7}\t{: >12}\t{: >15}\t   {: ^15}\t{: <30}",
             "pid",
             "open (ms)",
             "timestamp",
