@@ -126,7 +126,7 @@ impl<'a> SessionSummary<'a> {
             }
             SortBy::ChildPids => {
                 sorted_summaries
-                    .par_sort_by(|(_, x), (_, y)| (y.child_pids.len().cmp(&x.child_pids.len())));
+                    .par_sort_by(|(_, x), (_, y)| (y.child_pids.len()).cmp(&x.child_pids.len()));
             }
             SortBy::Pid => {
                 sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
@@ -213,22 +213,11 @@ impl<'a> SessionSummary<'a> {
         writeln!(
             stdout(),
             "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
-            "",
-            "active",
-            "wait",
-            "total",
-            "% of",
-            "",
-            ""
-        )?;
-        writeln!(
-            stdout(),
-            "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
             "pid",
-            "(ms)",
-            "(ms)",
-            "(ms)",
-            "actv time",
+            "actv (ms)",
+            "wait (ms)",
+            "total (ms)",
+            "% of actv",
             "syscalls",
             "children"
         )?;
@@ -277,10 +266,6 @@ impl<'a> SessionSummary<'a> {
         )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
-            if pid_summary.syscall_count == 0 {
-                continue;
-            }
-
             writeln!(stdout(), "PID {}", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
@@ -321,7 +306,7 @@ impl<'a> SessionSummary<'a> {
                         writeln!(stdout(), "  Slowest file open times for PID {}:\n", pid)?;
                         writeln!(
                             stdout(),
-                            "  {:>10}\t{: >15}\t   {: ^15}\t{: <30}",
+                            "  {:>10}\t{: ^15}\t   {: ^15}\t{: <30}",
                             "open (ms)",
                             "timestamp",
                             "error",
@@ -359,7 +344,7 @@ impl<'a> SessionSummary<'a> {
         )?;
         writeln!(
             stdout(),
-            "  --------\t          ---------           \t--------"
+            "  -------\t          ---------            \t--------"
         )?;
 
         let pids = match print_type {
@@ -391,10 +376,10 @@ impl<'a> SessionSummary<'a> {
     ) -> Result<(), Error> {
         let file_times = file_data::files_opened(raw_data, &pids_to_print);
 
-        writeln!(stdout(), "\nFiles Opened\n")?;
+        writeln!(stdout(), "\nFiles Opened")?;
         writeln!(
             stdout(),
-            "\n  {: >7}\t{: >12}\t{: >15}\t   {: ^15}\t{: <30}",
+            "\n  {: >7}\t{: ^12}\t{: ^15}\t   {: ^15}\t{: <30}",
             "pid",
             "open (ms)",
             "timestamp",

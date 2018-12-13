@@ -29,13 +29,8 @@ impl<'a> fmt::Display for PidSummary<'a> {
         )?;
         writeln!(
             f,
-            "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: <8}",
-            "", "", "total", "max", "avg", "min", ""
-        )?;
-        writeln!(
-            f,
             "  {: <15}\t{: >8}\t{: >10}\t{: >10}\t{: >10}\t{: >10}\t{: >4}",
-            "syscall", "count", "(ms)", "(ms)", "(ms)", "(ms)", "errors"
+            "syscall", "count", "total (ms)", "max (ms)", "avg (ms)", " min (ms)", "errors"
         )?;
         writeln!(
             f,
