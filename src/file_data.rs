@@ -42,7 +42,7 @@ impl<'a> fmt::Display for FileData<'a> {
 
         write!(
             f,
-            "  {0: >10.3}\t{1: >15}\t   {2: ^15}\t   {3: <30}",
+            "  {0: >10.3}\t{1: ^15}\t   {2: ^15}\t   {3: <30}",
             length, self.time, error, name
         )
     }
