@@ -3,10 +3,10 @@ use self::session_summary::SessionSummary;
 use self::sort_by::SortBy;
 use clap::{App, Arg, ArgGroup};
 use fxhash::FxBuildHasher;
-use rayon_hash::{HashMap, HashSet};
 use std::fs::File;
 use std::io::prelude::*;
 
+mod check_flags;
 mod file_data;
 mod histogram;
 mod parser;
@@ -18,8 +18,8 @@ mod syscall_data;
 mod syscall_stats;
 
 type Pid = i32;
-type RayonFxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
-type RayonFxHashSet<T> = HashSet<T, FxBuildHasher>;
+type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
+type HashSet<T> = rayon_hash::HashSet<T, FxBuildHasher>;
 
 enum SubCmd {
     Pid,
@@ -57,7 +57,7 @@ fn validate_count(c: String) -> Result<(), String> {
 
 fn main() {
     let app_matches = App::new("strace parser")
-        .version("0.3.0")
+        .version("0.3.1")
         .author("Will Chandler <wchandler@gitlab.com>")
         .about("Summarizes raw strace output")
         .arg(
@@ -202,6 +202,11 @@ fn main() {
         std::process::exit(1);
     }
 
+    match check_flags::correct_strace_flags(&buffer.lines().nth(0).unwrap_or_default()) {
+        Ok(true) => {}
+        _ => std::process::exit(0),
+    }
+
     let syscall_data = syscall_data::build_syscall_data(&buffer);
 
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
@@ -212,7 +217,7 @@ fn main() {
 
     let print_status = match sub_cmd {
         SubCmd::Pid => {
-            let pid_strs: RayonFxHashSet<_> = app_matches.values_of("pid").unwrap().collect();
+            let pid_strs: HashSet<_> = app_matches.values_of("pid").unwrap().collect();
             let pids: Vec<_> = pid_strs
                 .into_iter()
                 .map(|p| p.parse::<Pid>().unwrap())
