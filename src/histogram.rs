@@ -1,13 +1,13 @@
 use crate::syscall_data::PidData;
+use crate::HashMap;
 use crate::Pid;
-use crate::RayonFxHashMap;
 use std::collections::BTreeMap;
 use std::io::{prelude::*, stdout, Error};
 
 pub fn print_histogram(
     syscall: &str,
     pids: &[Pid],
-    syscall_data: &RayonFxHashMap<Pid, PidData>,
+    syscall_data: &HashMap<Pid, PidData>,
 ) -> Result<(), Error> {
     let distribution = build_distribution(syscall, pids, syscall_data);
 
@@ -71,7 +71,7 @@ pub fn print_histogram(
 fn build_distribution(
     syscall: &str,
     pids: &[Pid],
-    syscall_data: &RayonFxHashMap<Pid, PidData>,
+    syscall_data: &HashMap<Pid, PidData>,
 ) -> BTreeMap<u32, i32> {
     let mut distribution = BTreeMap::new();
     let mut max_pow = 0;

@@ -1,6 +1,6 @@
 use crate::syscall_data::PidData;
 use crate::Pid;
-use crate::RayonFxHashMap;
+use crate::HashMap;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -13,7 +13,7 @@ pub struct SyscallStats<'a> {
     max: f32,
     avg: f32,
     min: f32,
-    errors: RayonFxHashMap<&'a str, i32>,
+    errors: HashMap<&'a str, i32>,
 }
 
 impl<'a> fmt::Display for SyscallStats<'a> {
@@ -35,9 +35,9 @@ impl<'a> fmt::Display for SyscallStats<'a> {
 }
 
 pub fn build_syscall_stats<'a>(
-    data: &RayonFxHashMap<Pid, PidData<'a>>,
-) -> RayonFxHashMap<Pid, Vec<SyscallStats<'a>>> {
-    let mut syscall_stats = RayonFxHashMap::default();
+    data: &HashMap<Pid, PidData<'a>>,
+) -> HashMap<Pid, Vec<SyscallStats<'a>>> {
+    let mut syscall_stats = HashMap::default();
 
     for (pid, pid_stats) in data {
         let mut event_stats: Vec<_> = pid_stats

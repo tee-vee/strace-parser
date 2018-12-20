@@ -1,8 +1,8 @@
-use crate::file_data;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{Pid, PidPrintAmt, PidSummary, RayonFxHashMap, RayonFxHashSet, SortBy};
+use crate::{file_data, file_data::SortFilesBy};
+use crate::{HashMap, HashSet, Pid, PidPrintAmt, PidSummary, SortBy};
 use chrono::Duration;
 use lazy_static::lazy_static;
 use petgraph::prelude::*;
@@ -13,8 +13,8 @@ use std::io::{prelude::*, stdout, Error};
 static PRINT_COUNT: usize = 10;
 
 lazy_static! {
-    static ref WAIT_SYSCALLS: RayonFxHashSet<&'static str> = {
-        let mut s = RayonFxHashSet::default();
+    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
+        let mut s = HashSet::default();
         s.insert("epoll_ctl");
         s.insert("epoll_wait");
         s.insert("epoll_pwait");
@@ -33,18 +33,18 @@ lazy_static! {
 }
 
 pub struct SessionSummary<'a> {
-    pid_summaries: RayonFxHashMap<Pid, PidSummary<'a>>,
+    pid_summaries: HashMap<Pid, PidSummary<'a>>,
     all_time: f32,
     all_active_time: f32,
 }
 
 impl<'a> SessionSummary<'a> {
     pub fn from_syscall_stats(
-        session_stats: &RayonFxHashMap<Pid, Vec<SyscallStats<'a>>>,
-        pid_data: &'a RayonFxHashMap<Pid, PidData<'a>>,
+        session_stats: &HashMap<Pid, Vec<SyscallStats<'a>>>,
+        pid_data: &'a HashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary {
-            pid_summaries: RayonFxHashMap::default(),
+            pid_summaries: HashMap::default(),
             all_time: 0.0,
             all_active_time: 0.0,
         };
@@ -286,9 +286,9 @@ impl<'a> SessionSummary<'a> {
     pub fn print_pid_details(
         &self,
         pids: &[Pid],
-        raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
+        raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(raw_data, &pids);
+        let file_times = file_data::files_opened(raw_data, &pids, SortFilesBy::Length);
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
@@ -372,9 +372,9 @@ impl<'a> SessionSummary<'a> {
     pub fn print_opened_files(
         &self,
         pids_to_print: &[Pid],
-        raw_data: &RayonFxHashMap<Pid, PidData<'a>>,
+        raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(raw_data, &pids_to_print);
+        let file_times = file_data::files_opened(raw_data, &pids_to_print, SortFilesBy::Time);
 
         writeln!(stdout(), "\nFiles Opened")?;
         writeln!(
