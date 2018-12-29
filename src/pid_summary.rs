@@ -50,22 +50,28 @@ impl<'a> PidSummary<'a> {
             Some(execve) if execve.get(0).is_some() => {
                 let cmd_quoted = {
                     let mut raw_cmd = execve[0].to_string();
-                    raw_cmd.pop();
+                    raw_cmd.pop(); // remove trailing comma
                     raw_cmd
                 };
-                let cmd = cmd_quoted.replace("\"", "");
+                let cmd = cmd_quoted.trim_matches('"').to_string();
 
-                let args = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
+                let args_w_comma = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
                     execve
                         .iter()
                         .skip(2)
+                        .take_while(|a| **a != "[/*")
+                        .map(|a| a.trim_end_matches(","))
                         .fold("[".to_string(), |s, a| s + a + " ")
                 } else {
                     execve
                         .iter()
                         .skip(2)
+                        .take_while(|a| **a != "[/*")
+                        .map(|a| a.trim_end_matches(","))
                         .fold(String::new(), |s, a| s + a + " ")
                 };
+
+                let args = args_w_comma.replace("\"],", "\"]");
 
                 Some((cmd, args))
             }
