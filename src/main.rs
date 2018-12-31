@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "nightly", feature(split_ascii_whitespace))]
+
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use self::sort_by::SortBy;

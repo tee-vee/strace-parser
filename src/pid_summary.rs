@@ -59,14 +59,12 @@ impl<'a> PidSummary<'a> {
                     execve
                         .iter()
                         .skip(2)
-                        .take_while(|a| **a != "[/*")
                         .map(|a| a.trim_end_matches(","))
                         .fold("[".to_string(), |s, a| s + a + " ")
                 } else {
                     execve
                         .iter()
                         .skip(2)
-                        .take_while(|a| **a != "[/*")
                         .map(|a| a.trim_end_matches(","))
                         .fold(String::new(), |s, a| s + a + " ")
                 };

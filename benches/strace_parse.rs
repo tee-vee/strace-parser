@@ -1,12 +1,13 @@
+#![feature(split_ascii_whitespace)]
+
 #[macro_use]
 extern crate criterion;
 
 use chrono::NaiveTime;
-use criterion::Criterion;
+use criterion::{Benchmark, Criterion, Throughput};
 use fxhash::FxBuildHasher;
 use rayon::prelude::*;
 use rayon_hash::HashMap;
-use smallvec::SmallVec;
 
 type Pid = i32;
 type RayonFxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
@@ -23,56 +24,7 @@ pub struct RawData<'a> {
     pub execve: Option<Vec<&'a str>>,
 }
 
-impl<'a> RawData<'a> {
-    pub fn from_strs(
-        pid_str: &'a str,
-        time_str: &'a str,
-        syscall: &'a str,
-        length_str: Option<&'a str>,
-        file: Option<&'a str>,
-        error: Option<&'a str>,
-        child_pid_str: Option<&'a str>,
-        execve: Option<Vec<&'a str>>,
-    ) -> Option<RawData<'a>> {
-        let pid = match pid_str.parse() {
-            Ok(pid) => pid,
-            Err(_) => return None,
-        };
-
-        let time = match NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f") {
-            Ok(time) => time,
-            Err(_) => return None,
-        };
-
-        let length = match length_str {
-            Some(length) => match length.parse() {
-                Ok(len) => Some(len),
-                Err(_) => None,
-            },
-            None => None,
-        };
-
-        let child_pid = match child_pid_str {
-            Some(child_pid) => match child_pid.parse() {
-                Ok(c_pid) => Some(c_pid),
-                Err(_) => None,
-            },
-            None => None,
-        };
-
-        Some(RawData {
-            pid,
-            time,
-            syscall,
-            length,
-            file,
-            error,
-            child_pid,
-            execve,
-        })
-    }
-}
-
+#[derive(Clone, Copy)]
 enum CallStatus {
     Resumed,
     Started,
@@ -112,17 +64,44 @@ impl<'a> PidData<'a> {
     }
 }
 
-pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
-    let tokens: SmallVec<[&str; 20]> = line.split_whitespace().collect();
+pub fn parse_line(line: &str) -> Option<RawData> {
+    let tokens = split_line(line);
+    parse_tokens(tokens)
+}
 
-    if tokens.len() < 5 {
-        return None;
-    }
+#[cfg(feature = "nightly")]
+fn split_line(line: &str) -> std::str::SplitAsciiWhitespace {
+    line.split_ascii_whitespace()
+}
 
-    let pid = tokens[0];
-    let time = tokens[1];
+#[cfg(not(feature = "nightly"))]
+fn split_line(line: &str) -> std::str::SplitWhitespace {
+    line.split_whitespace()
+}
 
-    let call_status = if tokens[2].starts_with('<') {
+fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
+where
+    I: DoubleEndedIterator<Item = &'a str>,
+{
+    let pid = match tokens.next().and_then(|p| p.parse::<Pid>().ok()) {
+        Some(p) => p,
+        _ => return None,
+    };
+
+    let time = match tokens
+        .next()
+        .and_then(|t| NaiveTime::parse_from_str(t, "%H:%M:%S%.6f").ok())
+    {
+        Some(t) => t,
+        _ => return None,
+    };
+
+    let syscall_token = match tokens.next() {
+        Some(t) => t,
+        None => return None,
+    };
+
+    let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
     } else {
         CallStatus::Started
@@ -133,81 +112,81 @@ pub fn parse_line<'a>(line: &'a str) -> Option<RawData<'a>> {
     let mut execve = None;
 
     match call_status {
-        CallStatus::Started => {
-            let split: SmallVec<[&str; 5]> = tokens[2].split('(').collect();
-
-            if split.len() < 2 {
-                return None;
-            }
-
-            syscall = split[0];
-            if syscall == "open" {
-                let file_quoted = split[1];
-                file = Some(&file_quoted[1..file_quoted.len() - 2]);
-            } else if syscall == "openat" {
-                let file_quoted = tokens[3];
-                file = Some(&file_quoted[1..file_quoted.len() - 2]);
-            } else if syscall == "execve" {
-                let v = vec![split[1]];
-                execve = Some(v);
-            }
-        }
         CallStatus::Resumed => {
-            syscall = tokens[3];
+            syscall = match tokens.next() {
+                Some(s) => s,
+                None => return None,
+            };
+        }
+        CallStatus::Started => {
+            let mut syscall_split = syscall_token.split('(');
+
+            syscall = match syscall_split.next() {
+                Some(s) => s,
+                None => return None,
+            };
+
+            if syscall == "open" {
+                file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
+            } else if syscall == "openat" {
+                file = tokens.next().and_then(|f| f.get(1..f.len() - 2));
+            } else if syscall == "execve" {
+                if let Some(t) = syscall_split.next() {
+                    let mut v = vec![t];
+                    tokens
+                        .by_ref()
+                        .take_while(|s| *s != "[/*")
+                        .for_each(|arg| v.push(arg));
+
+                    execve = Some(v);
+                }
+            }
         }
     }
 
-    let length = match tokens.last() {
-        Some(token) => {
-            if token.starts_with('<') {
-                Some(&token[1..token.len() - 1])
-            } else {
-                None
-            }
-        }
-        None => None,
+    let mut tokens_from_end = tokens.rev();
+
+    let length = match tokens_from_end
+        .next()
+        .filter(|t| t.starts_with('<'))
+        .and_then(|t| t.get(1..t.len() - 1))
+        .map(|p| p.parse::<f32>())
+    {
+        Some(Ok(time)) => Some(time),
+        _ => None,
     };
 
     let mut child_pid = None;
     let mut error = None;
 
-    if let Some(_) = length {
-        let eq_pos = tokens.iter().rposition(|&t| t == "=");
-        if let Some(pos) = eq_pos {
-            if syscall == "clone" {
-                if let Some(child_pid_str) = tokens.get(pos + 1).map(|t| *t) {
-                    child_pid = Some(child_pid_str);
-                }
+    if length.is_some() {
+        let mut end_tokens = tokens_from_end.take_while(|t| *t != "=").peekable();
+
+        while let Some(token) = end_tokens.next() {
+            if token.starts_with('E') {
+                error = Some(token);
             }
 
-            if syscall == "execve" {
-                let len_from_execve_to_eq = pos - 3;
-                if let Some(ref mut v) = execve {
-                    let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
-                    while let Some(cmd) = cmds.next() {
-                        &v.push(cmd);
-                    }
-                }
-            }
-
-            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with("E"));
-            if let Some(e_pos) = err_pos {
-                error = tokens.get(pos + e_pos).map(|t| *t);
-            }
-        }
-    } else if syscall == "execve" {
-        if let CallStatus::Started = call_status {
-            let len_from_execve_to_unfin = tokens.len() - 5;
-            if let Some(ref mut v) = execve {
-                let mut cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
-                while let Some(cmd) = cmds.next() {
-                    v.push(cmd);
+            if end_tokens.peek().is_none()
+                && (syscall == "clone" || syscall == "vfork" || syscall == "fork")
+            {
+                if let Ok(kid) = token.parse::<Pid>() {
+                    child_pid = Some(kid);
                 }
             }
         }
     }
 
-    RawData::from_strs(pid, time, syscall, length, file, error, child_pid, execve)
+    Some(RawData {
+        pid,
+        time,
+        syscall,
+        length,
+        file,
+        error,
+        child_pid,
+        execve,
+    })
 }
 
 pub fn build_syscall_data<'a>(buffer: &'a str) -> RayonFxHashMap<Pid, PidData<'a>> {
@@ -301,15 +280,50 @@ fn coalesce_pid_data<'a>(
     }
 }
 
-fn parse_strace(buffer: &str) {
+fn build_strace_data(buffer: &str) {
     let _syscall_data = build_syscall_data(buffer);
 }
 
-fn parse_benchmark(c: &mut Criterion) {
-    c.bench_function("parse strace", move |b| b.iter(|| parse_strace(DATA)));
+fn parse_strace_st(buffer: &str) {
+    let mut parsed_data = Vec::new();
+    for line in buffer.lines() {
+        parsed_data.push(parse_line(line));
+    }
 }
 
-criterion_group!(benches, parse_benchmark);
+fn parse_strace_mt(buffer: &str) {
+    let _data: Vec<_> = buffer.par_lines().map(|l| parse_line(l)).collect();
+}
+
+fn data_benchmark(c: &mut Criterion) {
+    c.bench(
+        "Full pipeline",
+        Benchmark::new("Throughput -- Multi-threaded", |b| {
+            b.iter(|| build_strace_data(DATA))
+        })
+        .throughput(Throughput::Bytes(DATA.len() as u32)),
+    );
+}
+
+fn throughput_bench(c: &mut Criterion) {
+    c.bench(
+        "Parser only",
+        Benchmark::new("Throughput -- Single-threaded", |b| {
+            b.iter(|| parse_strace_st(DATA))
+        })
+        .throughput(Throughput::Bytes(DATA.len() as u32)),
+    );
+
+    c.bench(
+        "Parser only",
+        Benchmark::new("Throughput -- Multi-threaded", |b| {
+            b.iter(|| parse_strace_mt(DATA))
+        })
+        .throughput(Throughput::Bytes(DATA.len() as u32)),
+    );
+}
+
+criterion_group!(benches, data_benchmark, throughput_bench);
 criterion_main!(benches);
 
 static DATA: &'static str = r##"

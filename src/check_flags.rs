@@ -31,7 +31,8 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
     } else {
         write!(
             stdout(),
-            "Unable to analyze file, the following flags need to be included when running strace: "
+            "Error: strace command must include '-fttT'\n
+The following required flags were missing when strace was run:  "
         )?;
 
         if !pid {

@@ -1,6 +1,5 @@
 use crate::Pid;
 use chrono::NaiveTime;
-use smallvec::SmallVec;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
@@ -14,72 +13,49 @@ pub struct RawData<'a> {
     pub execve: Option<Vec<&'a str>>,
 }
 
-impl<'a> RawData<'a> {
-    pub fn from_strs(
-        pid_str: &'a str,
-        time_str: &'a str,
-        syscall: &'a str,
-        length_str: Option<&'a str>,
-        file: Option<&'a str>,
-        error: Option<&'a str>,
-        child_pid_str: Option<&'a str>,
-        execve: Option<Vec<&'a str>>,
-    ) -> Option<RawData<'a>> {
-        let pid = match pid_str.parse() {
-            Ok(pid) => pid,
-            Err(_) => return None,
-        };
-
-        let time = match NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f") {
-            Ok(time) => time,
-            Err(_) => return None,
-        };
-
-        let length = match length_str {
-            Some(length) => match length.parse() {
-                Ok(len) => Some(len),
-                Err(_) => None,
-            },
-            None => None,
-        };
-
-        let child_pid = match child_pid_str {
-            Some(child_pid) => match child_pid.parse() {
-                Ok(c_pid) => Some(c_pid),
-                Err(_) => None,
-            },
-            None => None,
-        };
-
-        Some(RawData {
-            pid,
-            time,
-            syscall,
-            length,
-            file,
-            error,
-            child_pid,
-            execve,
-        })
-    }
-}
-
 enum CallStatus {
     Resumed,
     Started,
 }
 
 pub fn parse_line(line: &str) -> Option<RawData> {
-    let tokens: SmallVec<[&str; 20]> = line.split_whitespace().collect();
+    let tokens = split_line(line);
+    parse_tokens(tokens)
+}
 
-    if tokens.len() < 5 {
-        return None;
-    }
+#[cfg(feature = "nightly")]
+fn split_line(line: &str) -> std::str::SplitAsciiWhitespace {
+    line.split_ascii_whitespace()
+}
 
-    let pid = tokens[0];
-    let time = tokens[1];
+#[cfg(not(feature = "nightly"))]
+fn split_line(line: &str) -> std::str::SplitWhitespace {
+    line.split_whitespace()
+}
 
-    let call_status = if tokens[2].starts_with('<') {
+fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
+where
+    I: DoubleEndedIterator<Item = &'a str>,
+{
+    let pid = match tokens.next().and_then(|p| p.parse::<Pid>().ok()) {
+        Some(p) => p,
+        _ => return None,
+    };
+
+    let time = match tokens
+        .next()
+        .and_then(|t| NaiveTime::parse_from_str(t, "%H:%M:%S%.6f").ok())
+    {
+        Some(t) => t,
+        _ => return None,
+    };
+
+    let syscall_token = match tokens.next() {
+        Some(t) => t,
+        None => return None,
+    };
+
+    let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
     } else {
         CallStatus::Started
@@ -90,32 +66,47 @@ pub fn parse_line(line: &str) -> Option<RawData> {
     let mut execve = None;
 
     match call_status {
-        CallStatus::Started => {
-            let split: SmallVec<[&str; 5]> = tokens[2].split('(').collect();
-
-            if split.len() < 2 {
-                return None;
-            }
-
-            syscall = split[0];
-            if syscall == "open" {
-                let file_quoted = split[1];
-                file = Some(&file_quoted[1..file_quoted.len() - 2]);
-            } else if syscall == "openat" {
-                let file_quoted = tokens[3];
-                file = Some(&file_quoted[1..file_quoted.len() - 2]);
-            } else if syscall == "execve" {
-                let v = vec![split[1]];
-                execve = Some(v);
-            }
-        }
         CallStatus::Resumed => {
-            syscall = tokens[3];
+            syscall = match tokens.next() {
+                Some(s) => s,
+                None => return None,
+            };
+        }
+        CallStatus::Started => {
+            let mut syscall_split = syscall_token.split('(');
+
+            syscall = match syscall_split.next() {
+                Some(s) => s,
+                None => return None,
+            };
+
+            if syscall == "open" {
+                file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
+            } else if syscall == "openat" {
+                file = tokens.next().and_then(|f| f.get(1..f.len() - 2));
+            } else if syscall == "execve" {
+                if let Some(t) = syscall_split.next() {
+                    let mut v = vec![t];
+                    tokens
+                        .by_ref()
+                        .take_while(|s| *s != "[/*")
+                        .for_each(|arg| v.push(arg));
+
+                    execve = Some(v);
+                }
+            }
         }
     }
 
-    let length = match tokens.last() {
-        Some(token) if token.starts_with('<') => Some(&token[1..token.len() - 1]),
+    let mut tokens_from_end = tokens.rev();
+
+    let length = match tokens_from_end
+        .next()
+        .filter(|t| t.starts_with('<'))
+        .and_then(|t| t.get(1..t.len() - 1))
+        .map(|p| p.parse::<f32>())
+    {
+        Some(Ok(time)) => Some(time),
         _ => None,
     };
 
@@ -123,42 +114,33 @@ pub fn parse_line(line: &str) -> Option<RawData> {
     let mut error = None;
 
     if length.is_some() {
-        let eq_pos = tokens.iter().rposition(|&t| t == "=");
-        if let Some(pos) = eq_pos {
-            if syscall == "clone" || syscall == "vfork" || syscall == "fork" {
-                if let Some(child_pid_str) = tokens.get(pos + 1).cloned() {
-                    child_pid = Some(child_pid_str);
-                }
+        let mut end_tokens = tokens_from_end.take_while(|t| *t != "=").peekable();
+
+        while let Some(token) = end_tokens.next() {
+            if token.starts_with('E') {
+                error = Some(token);
             }
 
-            if syscall == "execve" {
-                let len_from_execve_to_eq = pos - 3;
-                if let Some(ref mut v) = execve {
-                    let cmds = tokens.iter().skip(3).take(len_from_execve_to_eq);
-                    for cmd in cmds {
-                        v.push(cmd);
-                    }
-                }
-            }
-
-            let err_pos = tokens.iter().skip(pos).position(|t| (*t).starts_with('E'));
-            if let Some(e_pos) = err_pos {
-                error = tokens.get(pos + e_pos).cloned();
-            }
-        }
-    } else if syscall == "execve" {
-        if let CallStatus::Started = call_status {
-            let len_from_execve_to_unfin = tokens.len() - 5;
-            if let Some(ref mut v) = execve {
-                let cmds = tokens.iter().skip(3).take(len_from_execve_to_unfin);
-                for cmd in cmds {
-                    v.push(cmd);
+            if end_tokens.peek().is_none()
+                && (syscall == "clone" || syscall == "vfork" || syscall == "fork")
+            {
+                if let Ok(kid) = token.parse::<Pid>() {
+                    child_pid = Some(kid);
                 }
             }
         }
     }
 
-    RawData::from_strs(pid, time, syscall, length, file, error, child_pid, execve)
+    Some(RawData {
+        pid,
+        time,
+        syscall,
+        length,
+        file,
+        error,
+        child_pid,
+        execve,
+    })
 }
 
 #[cfg(test)]
@@ -166,57 +148,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn raw_data_returns_none_invalid_pid() {
-        assert_eq!(
-            RawData::from_strs(
-                "123aaa",
-                "00:09:47.790763",
-                "test",
-                None,
-                None,
-                None,
-                None,
-                None
-            ),
-            None
-        );
+    fn parser_returns_none_invalid_pid() {
+        let input = r##"16aaa 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
+        assert_eq!(parse_line(input), None);
     }
 
     #[test]
-    fn raw_data_returns_none_invalid_time() {
-        assert_eq!(
-            RawData::from_strs(
-                "123aaa",
-                "00:09:47.790763abcdefg",
-                "test",
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-            None
-        );
+    fn parser_returns_none_missing_pid() {
+        let input = r##"11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
+        assert_eq!(parse_line(input), None);
     }
 
     #[test]
-    fn raw_data_returns_some_invalid_length() {
+    fn parser_captures_pid() {
+        let input = r##" 16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
         assert_eq!(
-            RawData::from_strs(
-                "123",
-                "00:09:47.790763",
-                "test",
-                Some("1.00000aaa"),
-                None,
-                None,
-                None,
-                None,
-            ),
+            parse_line(input),
             Some(RawData {
-                pid: 123,
-                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
-                syscall: "test",
-                length: None,
+                pid: 16747,
+                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                syscall: "open",
+                length: Some(0.000030),
+                file: Some("/dev/null"),
+                error: None,
+                child_pid: None,
+                execve: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_returns_none_invalid_time() {
+        let input = r##"16747 11:9a:49.12e1 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
+        assert_eq!(parse_line(input), None);
+    }
+
+    #[test]
+    fn parser_returns_none_missing_time() {
+        let input = r##"16747 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
+        assert_eq!(parse_line(input), None);
+    }
+
+    #[test]
+    fn parser_captures_time() {
+        let input = r##"24009 09:07:12.773648 brk(NULL)         = 0x137e000 <0.000011>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 24009,
+                time: NaiveTime::from_hms_micro(9, 7, 12, 773648),
+                syscall: "brk",
+                length: Some(0.000011),
                 file: None,
                 error: None,
                 child_pid: None,
@@ -226,23 +208,51 @@ mod tests {
     }
 
     #[test]
-    fn raw_data_returns_some_invalid_child_pid() {
+    fn parser_returns_some_invalid_length() {
+        let input = r##"16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000aaa>"##;
         assert_eq!(
-            RawData::from_strs(
-                "123",
-                "00:09:47.790763",
-                "test",
-                None,
-                None,
-                None,
-                Some("123aaa"),
-                None,
-            ),
+            parse_line(input),
             Some(RawData {
-                pid: 123,
-                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
-                syscall: "test",
+                pid: 16747,
+                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                syscall: "open",
                 length: None,
+                file: Some("/dev/null"),
+                error: None,
+                child_pid: None,
+                execve: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_length() {
+        let input = r##"16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 16747,
+                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                syscall: "open",
+                length: Some(0.000030),
+                file: Some("/dev/null"),
+                error: None,
+                child_pid: None,
+                execve: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_returns_some_invalid_child_pid() {
+        let input = r##"16747 11:29:49.113885 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe42085c9d0) = 23aa <0.000118>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 16747,
+                time: NaiveTime::from_hms_micro(11, 29, 49, 113885),
+                syscall: "clone",
+                length: Some(0.000118),
                 file: None,
                 error: None,
                 child_pid: None,
@@ -252,77 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn raw_data_constructed_pid_length_child_pid() {
+    fn parser_captures_child_pid() {
+        let input = r##"16747 11:29:49.113885 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe42085c9d0) = 23151 <0.000118>"##;
         assert_eq!(
-            RawData::from_strs(
-                "123",
-                "00:09:47.790763",
-                "test",
-                Some("1.000000"),
-                Some("/dev/null"),
-                Some("EWAT"),
-                Some("456"),
-                None,
-            ),
+            parse_line(input),
             Some(RawData {
-                pid: 123,
-                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
-                syscall: "test",
-                length: Some(1.000000),
-                file: Some("/dev/null"),
-                error: Some("EWAT"),
-                child_pid: Some(456),
-                execve: None,
-            })
-        );
-    }
-
-    #[test]
-    fn raw_data_constructed_pid_length() {
-        assert_eq!(
-            RawData::from_strs(
-                "123",
-                "00:09:47.790763",
-                "test",
-                Some("1.000000"),
-                Some("/dev/null"),
-                Some("EWAT"),
-                None,
-                None,
-            ),
-            Some(RawData {
-                pid: 123,
-                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
-                syscall: "test",
-                length: Some(1.000000),
-                file: Some("/dev/null"),
-                error: Some("EWAT"),
-                child_pid: None,
-                execve: None,
-            })
-        );
-    }
-    #[test]
-    fn raw_data_constructed_pid() {
-        assert_eq!(
-            RawData::from_strs(
-                "123",
-                "00:09:47.790763",
-                "test",
-                None,
-                Some("/dev/null"),
-                Some("EWAT"),
-                None,
-                None,
-            ),
-            Some(RawData {
-                pid: 123,
-                time: NaiveTime::from_hms_micro(0, 9, 47, 790763),
-                syscall: "test",
-                length: None,
-                file: Some("/dev/null"),
-                error: Some("EWAT"),
-                child_pid: None,
+                pid: 16747,
+                time: NaiveTime::from_hms_micro(11, 29, 49, 113885),
+                syscall: "clone",
+                length: Some(0.000118),
+                file: None,
+                error: None,
+                child_pid: Some(23151),
                 execve: None,
             })
         );
@@ -341,15 +292,7 @@ mod tests {
                 file: None,
                 error: None,
                 child_pid: None,
-                execve: Some(vec![
-                    "\"/bin/sleep\",",
-                    "[\"sleep\",",
-                    "\"1\"],",
-                    "[/*",
-                    "12",
-                    "vars",
-                    "*/])"
-                ])
+                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",])
             })
         );
     }
@@ -367,34 +310,9 @@ mod tests {
                 file: None,
                 error: None,
                 child_pid: None,
-                execve: Some(vec![
-                    "\"/bin/sleep\",",
-                    "[\"sleep\",",
-                    "\"1\"],",
-                    "[/*",
-                    "12",
-                    "vars",
-                    "*/])"
-                ])
+                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",])
             })
         );
     }
 
-    #[test]
-    fn parser_captures_child_pid() {
-        let input = r##"13656 10:53:02.442246 vfork() = 55900 <0.000229>"##;
-        assert_eq!(
-            parse_line(input),
-            Some(RawData {
-                pid: 13656,
-                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
-                syscall: "vfork",
-                length: Some(0.000229),
-                file: None,
-                error: None,
-                child_pid: Some(55900),
-                execve: None,
-            })
-        );
-    }
 }
