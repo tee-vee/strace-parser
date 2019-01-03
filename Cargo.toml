@@ -1,6 +1,6 @@
 [package]
 name = "strace-parser"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Will Chandler <wchandler@gitlab.com>"]
 edition = "2018"
 
