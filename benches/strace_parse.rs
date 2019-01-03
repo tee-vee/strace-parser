@@ -1,6 +1,5 @@
 #![feature(split_ascii_whitespace)]
 
-use chrono::NaiveTime;
 use criterion::{criterion_group, criterion_main, Benchmark, Criterion, Throughput};
 use fxhash::FxBuildHasher;
 use rayon::prelude::*;
@@ -11,7 +10,7 @@ type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
     pub pid: Pid,
-    pub time: NaiveTime,
+    pub time: &'a str,
     pub syscall: &'a str,
     pub length: Option<f32>,
     pub file: Option<&'a str>,
@@ -81,15 +80,18 @@ where
 {
     let pid = match tokens.next().and_then(|p| p.parse::<Pid>().ok()) {
         Some(p) => p,
-        _ => return None,
+        None => return None,
     };
 
-    let time = match tokens
-        .next()
-        .and_then(|t| NaiveTime::parse_from_str(t, "%H:%M:%S%.6f").ok())
-    {
+    let time = match tokens.next().filter(|time_token| {
+        time_token
+            .chars()
+            .next()
+            .filter(|c| c.is_numeric())
+            .is_some()
+    }) {
         Some(t) => t,
-        _ => return None,
+        None => return None,
     };
 
     let syscall_token = match tokens.next() {
@@ -142,15 +144,11 @@ where
 
     let mut tokens_from_end = tokens.rev();
 
-    let length = match tokens_from_end
+    let length = tokens_from_end
         .next()
         .filter(|t| t.starts_with('<'))
         .and_then(|t| t.get(1..t.len() - 1))
-        .map(|p| p.parse::<f32>())
-    {
-        Some(Ok(time)) => Some(time),
-        _ => None,
-    };
+        .and_then(|p| p.parse::<f32>().ok());
 
     let mut child_pid = None;
     let mut error = None;
@@ -166,9 +164,7 @@ where
             if end_tokens.peek().is_none()
                 && (syscall == "clone" || syscall == "vfork" || syscall == "fork")
             {
-                if let Ok(kid) = token.parse::<Pid>() {
-                    child_pid = Some(kid);
-                }
+                child_pid = token.parse::<Pid>().ok();
             }
         }
     }
@@ -290,8 +286,8 @@ fn parse_strace_mt(buffer: &str) {
 
 fn data_benchmark(c: &mut Criterion) {
     c.bench(
-        "Full pipeline",
-        Benchmark::new("Throughput -- Multi-threaded", |b| {
+        "Full Pipeline",
+        Benchmark::new("Throughput -- Multi-Threaded", |b| {
             b.iter(|| build_strace_data(DATA))
         })
         .throughput(Throughput::Bytes(DATA.len() as u32)),
@@ -300,16 +296,16 @@ fn data_benchmark(c: &mut Criterion) {
 
 fn throughput_bench(c: &mut Criterion) {
     c.bench(
-        "Parser only",
-        Benchmark::new("Throughput -- Single-threaded", |b| {
+        "Parser-Only",
+        Benchmark::new("Throughput -- Single-Threaded", |b| {
             b.iter(|| parse_strace_st(DATA))
         })
         .throughput(Throughput::Bytes(DATA.len() as u32)),
     );
 
     c.bench(
-        "Parser only",
-        Benchmark::new("Throughput -- Multi-threaded", |b| {
+        "Parser-Only",
+        Benchmark::new("Throughput -- Multi-Threaded", |b| {
             b.iter(|| parse_strace_mt(DATA))
         })
         .throughput(Throughput::Bytes(DATA.len() as u32)),

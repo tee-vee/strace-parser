@@ -1,38 +1,44 @@
+use crate::real_time;
 use crate::Pid;
 use chrono::NaiveTime;
 use std::io::{prelude::*, stdout, Error};
 
 pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
-    let tokens: Vec<_> = line.split_whitespace().collect();
+    let mut tokens = line.split_whitespace();
 
-    let pid = tokens
-        .get(0)
-        .cloned()
-        .unwrap_or_default()
-        .parse::<Pid>()
-        .is_ok();
+    let pid = tokens.next().and_then(|p| p.parse::<Pid>().ok()).is_some();
 
-    let time = if pid {
-        NaiveTime::parse_from_str(tokens.get(1).cloned().unwrap_or_default(), "%H:%M:%S%.6f")
-            .is_ok()
-    } else {
-        NaiveTime::parse_from_str(tokens.get(0).cloned().unwrap_or_default(), "%H:%M:%S%.6f")
-            .is_ok()
-    };
+    let time_str = tokens
+        .next()
+        .filter(|time_token| {
+            time_token
+                .chars()
+                .next()
+                .filter(|c| c.is_numeric())
+                .is_some()
+        })
+        .unwrap_or_default();
 
-    let execution = tokens
-        .last()
-        .cloned()
-        .filter(|s| s.ends_with('>'))
-        .is_some();
+    let time =
+        if NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f").is_ok() && time_str.contains('.') {
+            true
+        } else if time_str.chars().next().filter(|c| *c != '0').is_some()
+            && real_time::parse_unix_timestamp(time_str).is_some()
+        {
+            true
+        } else {
+            false
+        };
+
+    let execution = tokens.next_back().filter(|s| s.ends_with('>')).is_some();
 
     if pid && time && execution {
         Ok(true)
     } else {
         write!(
             stdout(),
-            "Error: strace command must include '-fttT'\n
-The following required flags were missing when strace was run:  "
+            "Error: strace command must include '-f -T and -tt OR -ttt'\n
+The following required flag(s) were missing when strace was run: "
         )?;
 
         if !pid {
@@ -40,7 +46,7 @@ The following required flags were missing when strace was run:  "
         }
 
         if !time {
-            write!(stdout(), "-tt ")?;
+            write!(stdout(), "[-tt OR -ttt] ")?;
         }
 
         if !execution {
@@ -81,12 +87,33 @@ mod tests {
         let input = r###"123 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
         assert_eq!(correct_strace_flags(&input).unwrap(), false);
     }
+
     #[test]
     fn present_time_found() {
-        let input =
-            r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
+        let input = r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
         assert_eq!(correct_strace_flags(&input).unwrap(), true);
     }
+
+    #[test]
+    fn short_time_rejected() {
+        let input =
+            r###"123 00:09:48 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
+        assert_eq!(correct_strace_flags(&input).unwrap(), false);
+    }
+
+    #[test]
+    fn unix_time_found() {
+        let input = r###"123 1546409294.931558 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
+        assert_eq!(correct_strace_flags(&input).unwrap(), true);
+    }
+
+    #[test]
+    fn relative_time_rejected() {
+        let input =
+            r###"123 0.000615 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
+        assert_eq!(correct_strace_flags(&input).unwrap(), false);
+    }
+
     #[test]
     fn missing_execution_caught() {
         let input = r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0"###;
@@ -94,15 +121,13 @@ mod tests {
     }
     #[test]
     fn present_execution_found() {
-        let input =
-            r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
+        let input = r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>"###;
         assert_eq!(correct_strace_flags(&input).unwrap(), true);
     }
 
     #[test]
     fn present_execution_unfinished_found() {
-        let input =
-            r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <unfinished ...>"###;
+        let input = r###"123 00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <unfinished ...>"###;
         assert_eq!(correct_strace_flags(&input).unwrap(), true);
     }
 }

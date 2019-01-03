@@ -46,34 +46,27 @@ impl<'a> fmt::Display for PidSummary<'a> {
 
 impl<'a> PidSummary<'a> {
     pub fn format_execve(&self) -> Option<(String, String)> {
-        match &self.execve {
-            Some(execve) if execve.get(0).is_some() => {
-                let cmd_quoted = {
-                    let mut raw_cmd = execve[0].to_string();
-                    raw_cmd.pop(); // remove trailing comma
-                    raw_cmd
-                };
-                let cmd = cmd_quoted.trim_matches('"').to_string();
+        if let Some(execve) = &self.execve {
+            let mut args_iter = execve.iter();
 
-                let args_w_comma = if execve.iter().skip(2).any(|s| s.ends_with("],")) {
-                    execve
-                        .iter()
-                        .skip(2)
-                        .map(|a| a.trim_end_matches(","))
-                        .fold("[".to_string(), |s, a| s + a + " ")
-                } else {
-                    execve
-                        .iter()
-                        .skip(2)
-                        .map(|a| a.trim_end_matches(","))
-                        .fold(String::new(), |s, a| s + a + " ")
-                };
+            let cmd = args_iter
+                .next()
+                .and_then(|c| c.get(1..c.len() - 2))
+                .unwrap_or_default()
+                .to_string();
 
-                let args = args_w_comma.replace("\"],", "\"]");
+            let mut args = args_iter
+                .skip(1)
+                .map(|a| a.trim_end_matches(","))
+                .fold(String::new(), |s, arg| s + arg + " ");
 
-                Some((cmd, args))
+            if execve.iter().any(|s| s.ends_with("],")) {
+                args.insert(0, '[');
             }
-            _ => None,
+
+            Some((cmd, args))
+        } else {
+            None
         }
     }
 

@@ -2,13 +2,12 @@ use crate::parser::RawData;
 use crate::syscall_data::PidData;
 use crate::HashMap;
 use crate::Pid;
-use chrono::NaiveTime;
 use rayon::prelude::*;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileData<'a> {
-    time: NaiveTime,
+    time: &'a str,
     file: Option<&'a str>,
     error: Option<&'a str>,
     length: Option<f32>,
@@ -27,22 +26,13 @@ impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
 
 impl<'a> fmt::Display for FileData<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let name = match &self.file {
-            Some(n) => n,
-            None => "",
-        };
-        let length = match self.length {
-            Some(l) => l * 1000.0,
-            None => 0.0,
-        };
-        let error = match &self.error {
-            Some(e) => e,
-            None => "-",
-        };
+        let name = &self.file.unwrap_or_default();
+        let length = self.length.map_or(0.0, |l| l * 1000.0);
+        let error = &self.error.unwrap_or_default();
 
         write!(
             f,
-            "  {0: >10.3}\t{1: ^15}\t   {2: ^15}\t   {3: <30}",
+            "  {0: >10.3}\t{1: ^17}\t   {2: ^15}\t   {3: <30}",
             length, self.time, error, name
         )
     }

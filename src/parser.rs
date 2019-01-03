@@ -1,10 +1,9 @@
 use crate::Pid;
-use chrono::NaiveTime;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
     pub pid: Pid,
-    pub time: NaiveTime,
+    pub time: &'a str,
     pub syscall: &'a str,
     pub length: Option<f32>,
     pub file: Option<&'a str>,
@@ -39,15 +38,18 @@ where
 {
     let pid = match tokens.next().and_then(|p| p.parse::<Pid>().ok()) {
         Some(p) => p,
-        _ => return None,
+        None => return None,
     };
 
-    let time = match tokens
-        .next()
-        .and_then(|t| NaiveTime::parse_from_str(t, "%H:%M:%S%.6f").ok())
-    {
+    let time = match tokens.next().filter(|time_token| {
+        time_token
+            .chars()
+            .next()
+            .filter(|c| c.is_numeric())
+            .is_some()
+    }) {
         Some(t) => t,
-        _ => return None,
+        None => return None,
     };
 
     let syscall_token = match tokens.next() {
@@ -89,7 +91,7 @@ where
                     let mut v = vec![t];
                     tokens
                         .by_ref()
-                        .take_while(|s| *s != "[/*")
+                        .take_while(|s| *s != "[/*" && *s != "/*")
                         .for_each(|arg| v.push(arg));
 
                     execve = Some(v);
@@ -100,15 +102,11 @@ where
 
     let mut tokens_from_end = tokens.rev();
 
-    let length = match tokens_from_end
+    let length = tokens_from_end
         .next()
         .filter(|t| t.starts_with('<'))
         .and_then(|t| t.get(1..t.len() - 1))
-        .map(|p| p.parse::<f32>())
-    {
-        Some(Ok(time)) => Some(time),
-        _ => None,
-    };
+        .and_then(|len| len.parse::<f32>().ok());
 
     let mut child_pid = None;
     let mut error = None;
@@ -124,9 +122,7 @@ where
             if end_tokens.peek().is_none()
                 && (syscall == "clone" || syscall == "vfork" || syscall == "fork")
             {
-                if let Ok(kid) = token.parse::<Pid>() {
-                    child_pid = Some(kid);
-                }
+                child_pid = token.parse::<Pid>().ok();
             }
         }
     }
@@ -166,7 +162,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 16747,
-                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                time: "11:29:49.112721",
                 syscall: "open",
                 length: Some(0.000030),
                 file: Some("/dev/null"),
@@ -175,12 +171,6 @@ mod tests {
                 execve: None,
             })
         );
-    }
-
-    #[test]
-    fn parser_returns_none_invalid_time() {
-        let input = r##"16747 11:9a:49.12e1 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
-        assert_eq!(parse_line(input), None);
     }
 
     #[test]
@@ -196,7 +186,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 24009,
-                time: NaiveTime::from_hms_micro(9, 7, 12, 773648),
+                time: "09:07:12.773648",
                 syscall: "brk",
                 length: Some(0.000011),
                 file: None,
@@ -214,7 +204,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 16747,
-                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                time: "11:29:49.112721",
                 syscall: "open",
                 length: None,
                 file: Some("/dev/null"),
@@ -232,7 +222,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 16747,
-                time: NaiveTime::from_hms_micro(11, 29, 49, 112721),
+                time: "11:29:49.112721",
                 syscall: "open",
                 length: Some(0.000030),
                 file: Some("/dev/null"),
@@ -250,7 +240,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 16747,
-                time: NaiveTime::from_hms_micro(11, 29, 49, 113885),
+                time: "11:29:49.113885",
                 syscall: "clone",
                 length: Some(0.000118),
                 file: None,
@@ -268,7 +258,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 16747,
-                time: NaiveTime::from_hms_micro(11, 29, 49, 113885),
+                time: "11:29:49.113885",
                 syscall: "clone",
                 length: Some(0.000118),
                 file: None,
@@ -286,7 +276,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 13656,
-                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
+                time: "10:53:02.442246",
                 syscall: "execve",
                 length: Some(0.000229),
                 file: None,
@@ -304,7 +294,7 @@ mod tests {
             parse_line(input),
             Some(RawData {
                 pid: 13656,
-                time: NaiveTime::from_hms_micro(10, 53, 02, 442246),
+                time: "10:53:02.442246",
                 syscall: "execve",
                 length: None,
                 file: None,
