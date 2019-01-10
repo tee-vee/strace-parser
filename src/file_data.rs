@@ -28,7 +28,7 @@ impl<'a> fmt::Display for FileData<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let name = &self.file.unwrap_or_default();
         let length = self.length.map_or(0.0, |l| l * 1000.0);
-        let error = &self.error.unwrap_or_default();
+        let error = &self.error.unwrap_or("-");
 
         write!(
             f,
