@@ -59,7 +59,7 @@ fn validate_count(c: String) -> Result<(), String> {
 
 fn main() {
     let app_matches = App::new("strace parser")
-        .version("0.3.2")
+        .version("0.3.3")
         .author("Will Chandler <wchandler@gitlab.com>")
         .about("Summarizes raw strace output")
         .arg(
