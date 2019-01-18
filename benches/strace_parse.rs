@@ -111,7 +111,13 @@ where
 
     match call_status {
         CallStatus::Resumed => {
-            syscall = match tokens.next() {
+            syscall = match tokens.next().filter(|syscall_tok| {
+                syscall_tok
+                    .chars()
+                    .next()
+                    .filter(|c| c.is_ascii_alphabetic())
+                    .is_some()
+            }) {
                 Some(s) => s,
                 None => return None,
             };
@@ -119,7 +125,13 @@ where
         CallStatus::Started => {
             let mut syscall_split = syscall_token.split('(');
 
-            syscall = match syscall_split.next() {
+            syscall = match syscall_split.next().filter(|syscall_tok| {
+                syscall_tok
+                    .chars()
+                    .next()
+                    .filter(|c| c.is_ascii_alphabetic())
+                    .is_some()
+            }) {
                 Some(s) => s,
                 None => return None,
             };
