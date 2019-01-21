@@ -36,26 +36,17 @@ fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
 where
     I: DoubleEndedIterator<Item = &'a str>,
 {
-    let pid = match tokens.next().and_then(|p| p.parse::<Pid>().ok()) {
-        Some(p) => p,
-        None => return None,
-    };
+    let pid = tokens.next().and_then(|p| p.parse::<Pid>().ok())?;
 
-    let time = match tokens.next().filter(|time_token| {
+    let time = tokens.next().filter(|time_token| {
         time_token
             .chars()
             .next()
             .filter(|c| c.is_numeric())
             .is_some()
-    }) {
-        Some(t) => t,
-        None => return None,
-    };
+    })?;
 
-    let syscall_token = match tokens.next() {
-        Some(t) => t,
-        None => return None,
-    };
+    let syscall_token = tokens.next()?;
 
     let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
@@ -69,30 +60,24 @@ where
 
     match call_status {
         CallStatus::Resumed => {
-            syscall = match tokens.next().filter(|syscall_tok| {
+            syscall = tokens.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
                     .next()
                     .filter(|c| c.is_ascii_alphabetic())
                     .is_some()
-            }) {
-                Some(s) => s,
-                None => return None,
-            };
+            })?;
         }
         CallStatus::Started => {
             let mut syscall_split = syscall_token.split('(');
 
-            syscall = match syscall_split.next().filter(|syscall_tok| {
+            syscall = syscall_split.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
                     .next()
                     .filter(|c| c.is_ascii_alphabetic())
                     .is_some()
-            }) {
-                Some(s) => s,
-                None => return None,
-            };
+            })?;
 
             if syscall == "open" {
                 file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
