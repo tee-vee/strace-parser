@@ -11,6 +11,7 @@ use std::io::prelude::*;
 mod check_flags;
 mod file_data;
 mod histogram;
+mod io;
 mod parser;
 mod pid_summary;
 mod real_time;

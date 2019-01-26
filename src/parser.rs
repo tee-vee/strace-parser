@@ -12,7 +12,7 @@ pub struct RawData<'a> {
     pub execve: Option<Vec<&'a str>>,
 }
 
-enum CallStatus {
+pub enum CallStatus {
     Resumed,
     Started,
 }
