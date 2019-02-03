@@ -24,6 +24,7 @@ pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
+    pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<&'a str>>,
 }
 
@@ -33,6 +34,7 @@ impl<'a> PidData<'a> {
             syscall_data: HashMap::default(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
+            io_events: Vec::new(),
             execve: None,
         }
     }
@@ -63,8 +65,8 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         .entry(raw_data.syscall)
         .or_insert_with(SyscallData::new);
 
-    if let Some(length) = raw_data.length {
-        syscall_entry.lengths.push(length);
+    if let Some(duration) = raw_data.duration {
+        syscall_entry.lengths.push(duration);
     }
 
     if let Some(error) = raw_data.error {
@@ -72,18 +74,24 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         *error_entry += 1;
     }
 
-    if let Some(child_pid) = raw_data.child_pid {
-        pid_entry.child_pids.push(child_pid);
-    }
-
-    if raw_data.syscall == "execve" {
-        if let Some(ref e) = raw_data.execve {
-            pid_entry.execve = Some(e.clone());
+    match raw_data.syscall {
+        "clone" | "fork" | "vfork" => {
+            if let Some(child_pid) = raw_data.rtn_cd {
+                pid_entry.child_pids.push(child_pid as Pid);
+            }
         }
-    }
-
-    if raw_data.syscall == "open" || raw_data.syscall == "openat" {
-        pid_entry.open_events.push(raw_data);
+        "execve" => {
+            if let Some(ref e) = raw_data.execve {
+                pid_entry.execve = Some(e.clone());
+            }
+        }
+        "open" | "openat" => {
+            pid_entry.open_events.push(raw_data);
+        }
+        "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+            pid_entry.io_events.push(raw_data);
+        }
+        _ => {}
     }
 }
 
@@ -110,13 +118,11 @@ fn coalesce_pid_data<'a>(
             }
         }
 
-        pid_entry
-            .child_pids
-            .extend(temp_pid_data.child_pids.into_iter());
+        pid_entry.child_pids.extend(temp_pid_data.child_pids);
 
-        pid_entry
-            .open_events
-            .extend(temp_pid_data.open_events.into_iter());
+        pid_entry.open_events.extend(temp_pid_data.open_events);
+
+        pid_entry.io_events.extend(temp_pid_data.io_events);
 
         if let Some(temp_execve) = temp_pid_data.execve {
             pid_entry.execve = Some(temp_execve);

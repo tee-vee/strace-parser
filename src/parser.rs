@@ -5,14 +5,17 @@ pub struct RawData<'a> {
     pub pid: Pid,
     pub time: &'a str,
     pub syscall: &'a str,
-    pub length: Option<f32>,
+    pub duration: Option<f32>,
     pub file: Option<&'a str>,
     pub error: Option<&'a str>,
-    pub child_pid: Option<Pid>,
+    pub rtn_cd: Option<i32>,
     pub execve: Option<Vec<&'a str>>,
+    pub call_status: CallStatus,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CallStatus {
+    Complete,
     Resumed,
     Started,
 }
@@ -46,10 +49,14 @@ where
             .is_some()
     })?;
 
+    let duration_token = tokens.next_back()?;
+
     let syscall_token = tokens.next()?;
 
     let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
+    } else if duration_token.starts_with('<') {
+        CallStatus::Complete
     } else {
         CallStatus::Started
     };
@@ -68,7 +75,7 @@ where
                     .is_some()
             })?;
         }
-        CallStatus::Started => {
+        CallStatus::Complete | CallStatus::Started => {
             let mut syscall_split = syscall_token.split('(');
 
             syscall = syscall_split.next().filter(|syscall_tok| {
@@ -79,47 +86,63 @@ where
                     .is_some()
             })?;
 
-            if syscall == "open" {
-                file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
-            } else if syscall == "openat" {
-                file = tokens.next().and_then(|f| f.get(1..f.len() - 2));
-            } else if syscall == "execve" {
-                if let Some(t) = syscall_split.next() {
-                    let mut v = vec![t];
-                    tokens
-                        .by_ref()
-                        .take_while(|s| *s != "[/*" && *s != "/*")
-                        .for_each(|arg| v.push(arg));
-
-                    execve = Some(v);
+            match syscall {
+                "open" => {
+                    file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
                 }
+                "openat" => {
+                    file = tokens.next().and_then(|f| f.get(1..f.len() - 2));
+                }
+                "execve" => {
+                    if let Some(t) = syscall_split.next() {
+                        let mut v = vec![t];
+                        tokens
+                            .by_ref()
+                            .take_while(|s| *s != "[/*" && *s != "/*")
+                            .for_each(|arg| v.push(arg));
+
+                        execve = Some(v);
+                    }
+                }
+                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
+                | "write" => {
+                    file = syscall_split.next().and_then(|s| {
+                        s.splitn(2, '<')
+                            .skip(1)
+                            .next()
+                            .and_then(|s| s.get(0..s.len() - 2))
+                    });
+                }
+                _ => {}
             }
         }
     }
 
-    let mut tokens_from_end = tokens.rev();
+    let duration = if duration_token.starts_with('<') {
+        duration_token
+            .get(1..duration_token.len() - 1)
+            .and_then(|len| len.parse::<f32>().ok())
+    } else {
+        None
+    };
 
-    let length = tokens_from_end
-        .next()
-        .filter(|t| t.starts_with('<'))
-        .and_then(|t| t.get(1..t.len() - 1))
-        .and_then(|len| len.parse::<f32>().ok());
-
-    let mut child_pid = None;
+    let mut rtn_cd = None;
     let mut error = None;
 
-    if length.is_some() {
-        let mut end_tokens = tokens_from_end.take_while(|t| *t != "=").peekable();
+    if duration.is_some() {
+        let mut end_tokens = tokens.rev().take_while(|t| *t != "=").peekable();
 
         while let Some(token) = end_tokens.next() {
             if token.starts_with('E') {
                 error = Some(token);
             }
 
-            if end_tokens.peek().is_none()
-                && (syscall == "clone" || syscall == "vfork" || syscall == "fork")
-            {
-                child_pid = token.parse::<Pid>().ok();
+            if end_tokens.peek().is_none() {
+                match syscall {
+                    "clone" | "fork" | "vfork" | "read" | "recv" | "recvfrom" | "recvmsg"
+                    | "send" | "sendmsg" | "sendto" | "write" => rtn_cd = token.parse::<i32>().ok(),
+                    _ => {}
+                }
             }
         }
     }
@@ -128,11 +151,12 @@ where
         pid,
         time,
         syscall,
-        length,
+        duration,
         file,
         error,
-        child_pid,
+        rtn_cd,
         execve,
+        call_status,
     })
 }
 
@@ -161,11 +185,12 @@ mod tests {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
-                length: Some(0.000030),
+                duration: Some(0.000030),
                 file: Some("/dev/null"),
                 error: None,
-                child_pid: None,
+                rtn_cd: None,
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -185,11 +210,12 @@ mod tests {
                 pid: 24009,
                 time: "09:07:12.773648",
                 syscall: "brk",
-                length: Some(0.000011),
+                duration: Some(0.000011),
                 file: None,
                 error: None,
-                child_pid: None,
+                rtn_cd: None,
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -209,11 +235,12 @@ mod tests {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
-                length: None,
+                duration: None,
                 file: Some("/dev/null"),
                 error: None,
-                child_pid: None,
+                rtn_cd: None,
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -227,11 +254,12 @@ mod tests {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
-                length: Some(0.000030),
+                duration: Some(0.000030),
                 file: Some("/dev/null"),
                 error: None,
-                child_pid: None,
+                rtn_cd: None,
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -245,11 +273,12 @@ mod tests {
                 pid: 16747,
                 time: "11:29:49.113885",
                 syscall: "clone",
-                length: Some(0.000118),
+                duration: Some(0.000118),
                 file: None,
                 error: None,
-                child_pid: None,
+                rtn_cd: None,
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -263,11 +292,12 @@ mod tests {
                 pid: 16747,
                 time: "11:29:49.113885",
                 syscall: "clone",
-                length: Some(0.000118),
+                duration: Some(0.000118),
                 file: None,
                 error: None,
-                child_pid: Some(23151),
+                rtn_cd: Some(23151),
                 execve: None,
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -281,11 +311,12 @@ mod tests {
                 pid: 13656,
                 time: "10:53:02.442246",
                 syscall: "execve",
-                length: Some(0.000229),
+                duration: Some(0.000229),
                 file: None,
                 error: None,
-                child_pid: None,
-                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",])
+                rtn_cd: None,
+                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",]),
+                call_status: CallStatus::Complete,
             })
         );
     }
@@ -299,11 +330,12 @@ mod tests {
                 pid: 13656,
                 time: "10:53:02.442246",
                 syscall: "execve",
-                length: None,
+                duration: None,
                 file: None,
                 error: None,
-                child_pid: None,
-                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",])
+                rtn_cd: None,
+                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",]),
+                call_status: CallStatus::Started,
             })
         );
     }
