@@ -57,7 +57,9 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                 pid: event.pid,
                 time: event.time,
                 syscall: event.syscall,
-                fd: event.file.unwrap_or_default(),
+                fd: event
+                    .file
+                    .unwrap_or("Unavailable: '-y' flag was not passed to strace"),
                 bytes: event.rtn_cd.unwrap_or_default(),
                 duration: event.duration.unwrap_or_default(),
                 error: event.error,
@@ -68,7 +70,9 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                         pid: event.pid,
                         time: event.time,
                         syscall: event.syscall,
-                        fd: event.file.unwrap_or_default(),
+                        fd: event
+                            .file
+                            .unwrap_or("Unavailable: '-y' flag was not passed to strace"),
                         bytes: next_event.rtn_cd.unwrap_or_default(),
                         duration: next_event.duration.unwrap_or_default(),
                         error: next_event.error,

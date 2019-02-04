@@ -37,8 +37,9 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
     } else {
         write!(
             stdout(),
-            "Error: strace command must include '-f -T and -tt OR -ttt'\n
-The following required flag(s) were missing when strace was run: "
+            "  Error: strace command must include '-f', '-T' and '-tt' OR '-ttt'\
+             \n    '-yyy' is also recommended to obtain all file names in '--io / -i'\
+             \n\n  The following required flag(s) were missing when strace was run: "
         )?;
 
         if !pid {
