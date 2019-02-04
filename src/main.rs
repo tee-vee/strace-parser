@@ -5,12 +5,12 @@ use self::session_summary::SessionSummary;
 use self::sort_by::SortBy;
 use clap::{App, Arg, ArgGroup};
 use fxhash::FxBuildHasher;
-use std::fs::File;
-use std::io::prelude::*;
+use std::fs;
 
 mod check_flags;
 mod file_data;
 mod histogram;
+mod io;
 mod parser;
 mod pid_summary;
 mod real_time;
@@ -33,6 +33,7 @@ pub enum PrintMode {
     Stats,
     Pid,
     Histogram(String),
+    Io,
     Exec,
     Open,
 }
@@ -108,6 +109,12 @@ fn main() {
                 .value_name("SYSCALL"),
         )
         .arg(
+            Arg::with_name("io")
+                .short("i")
+                .long("io")
+                .help("List read/writes from 'read', 'recvmsg', 'sendmsg', and 'write'"),
+        )
+        .arg(
             Arg::with_name("pid")
                 .short("p")
                 .long("pid")
@@ -140,7 +147,7 @@ fn main() {
         )
         .group(
             ArgGroup::with_name("list_group")
-                .args(&["exec", "files", "histogram"])
+                .args(&["exec", "files", "io", "histogram"])
                 .conflicts_with("summary_group"),
         )
         .group(
@@ -165,6 +172,8 @@ fn main() {
                 PrintMode::Open
             } else if let Some(hist) = app_matches.value_of("histogram") {
                 PrintMode::Histogram(hist.to_string())
+            } else if app_matches.is_present("io") {
+                PrintMode::Io
             } else {
                 PrintMode::Pid
             }
@@ -178,6 +187,8 @@ fn main() {
                 PrintMode::Open
             } else if let Some(hist) = app_matches.value_of("histogram") {
                 PrintMode::Histogram(hist.to_string())
+            } else if app_matches.is_present("io") {
+                PrintMode::Io
             } else {
                 PrintMode::Summary
             }
@@ -186,18 +197,13 @@ fn main() {
 
     let file_name = app_matches.value_of("INPUT").unwrap();
 
-    let mut f = match File::open(file_name) {
+    let buffer = match fs::read_to_string(file_name) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("File: {} -- {}", file_name, e);
             std::process::exit(1);
         }
     };
-
-    let mut buffer = String::new();
-
-    f.read_to_string(&mut buffer)
-        .expect("Error: unable to read file to string");
 
     if buffer.is_empty() {
         eprintln!("Error: {} is empty", file_name);
@@ -241,6 +247,7 @@ fn main() {
                 PrintMode::Histogram(syscall) => {
                     histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
                 }
+                PrintMode::Io => session_summary.print_io(&pids_to_print, &syscall_data),
                 _ => session_summary.print_pid_details(&pids_to_print, &syscall_data),
             }
         }
@@ -271,6 +278,7 @@ fn main() {
                 PrintMode::Histogram(syscall) => {
                     histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data)
                 }
+                PrintMode::Io => session_summary.print_io(&session_summary.pids(), &syscall_data),
                 _ => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
             }
         }
