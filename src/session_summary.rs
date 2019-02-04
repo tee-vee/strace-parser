@@ -416,7 +416,7 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nI/O Performed")?;
         writeln!(
             stdout(),
-            "  {: >7}    {: >10}    {: ^15}    {: <8}    {: >8}    {: ^15}     {: <30}",
+            "\n  {: >7}    {: >10}    {: ^15}    {: <8}    {: >8}    {: ^15}     {: <30}",
             "pid",
             "dur (ms)",
             "timestamp",

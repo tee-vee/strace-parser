@@ -8,6 +8,7 @@ It can generate the following metrics:
    * Details of a process, including the statistics, files opened, and related PIDS
    * A list of all programs executed in session
    * A list of all file opened in session
+   * A list of all read/write calls made in session
    * A histogram showing the distribution of execution times for a given syscall
 
 **NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
@@ -96,6 +97,23 @@ Files Opened
   -------	------------	---------------	   ---------------	   ---------
      2913	       0.553	11:35:02.902746	          -       	   /dev/null
      2913	       0.355	11:35:11.658594	          -       	   /proc/stat
+```
+
+---
+
+`-i, --io`
+
+Print a list of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `sendto`, and `sendmsg` calls in session
+
+```
+I/O Performed
+
+      pid      dur (ms)       timestamp       syscall        bytes         error          file name
+  -------    ----------    ---------------    --------    --------    ---------------     ---------
+    20212         0.076    11:26:27.294812    read               0            -           pipe:[2645699502]
+    20212         0.080    11:26:27.295020    read               0            -           pipe:[2645699502]
+    20212         0.108    11:26:27.295187    read               0            -           pipe:[2645699502]
+    20212         0.170    11:26:27.392784    write             30            -           UNIX:[2645216608->2645215442]
 ```
 
 ---
