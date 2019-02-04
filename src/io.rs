@@ -7,13 +7,13 @@ use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IoCall<'a> {
-    pid: Pid,
-    time: &'a str,
-    syscall: &'a str,
-    fd: &'a str,
-    bytes: i32,
-    duration: f32,
-    error: Option<&'a str>,
+    pub pid: Pid,
+    pub time: &'a str,
+    pub syscall: &'a str,
+    pub fd: &'a str,
+    pub bytes: i32,
+    pub duration: f32,
+    pub error: Option<&'a str>,
 }
 
 impl<'a> fmt::Display for IoCall<'a> {

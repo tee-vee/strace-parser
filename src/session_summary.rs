@@ -374,7 +374,7 @@ impl<'a> SessionSummary<'a> {
         pids_to_print: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(&pids_to_print, raw_data, SortFilesBy::Time);
+        let open_calls = file_data::files_opened(&pids_to_print, raw_data, SortFilesBy::Time);
 
         writeln!(stdout(), "\nFiles Opened")?;
         writeln!(
@@ -391,16 +391,18 @@ impl<'a> SessionSummary<'a> {
             "  -------    ----------    ---------------    ---------------    ---------"
         )?;
 
-        let mut sorted_pids: Vec<_> = file_times.iter().map(|(pid, _)| *pid).collect();
-        sorted_pids.sort();
+        let mut open_events: Vec<_> = pids_to_print
+            .iter()
+            .filter_map(|pid| open_calls.get(pid))
+            .flatten()
+            .collect();
 
-        for pid in sorted_pids {
-            let files = &file_times[&pid];
+        open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
 
-            for file in files {
-                writeln!(stdout(), "  {: >7}    {}", pid, file,)?;
-            }
+        for event in open_events {
+            writeln!(stdout(), "{}", event,)?;
         }
+
         writeln!(stdout())?;
 
         Ok(())
@@ -430,13 +432,18 @@ impl<'a> SessionSummary<'a> {
             "  -------    ----------    ---------------    --------    --------    ---------------     ---------"
         )?;
 
-        for pid in pids_to_print {
-            if let Some(calls) = io_calls.get(pid) {
-                for call in calls {
-                    writeln!(stdout(), "{}", call)?;
-                }
-            }
+        let mut io_events: Vec<_> = pids_to_print
+            .iter()
+            .filter_map(|pid| io_calls.get(pid))
+            .flatten()
+            .collect();
+
+        io_events.par_sort_by(|x, y| (x.time).cmp(y.time));
+
+        for event in io_events {
+            writeln!(stdout(), "{}", event)?;
         }
+
         writeln!(stdout())?;
 
         Ok(())
