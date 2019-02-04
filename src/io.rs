@@ -9,7 +9,7 @@ use std::fmt;
 pub struct IoCall<'a> {
     pid: Pid,
     time: &'a str,
-    syscall: Syscall,
+    syscall: &'a str,
     fd: &'a str,
     bytes: i32,
     duration: f32,
@@ -24,36 +24,9 @@ impl<'a> fmt::Display for IoCall<'a> {
 
         write!(
             f,
-            "  {: >7}\t{: >10.3}\t{: ^17}\t{: ^5}\t{: >8}\t{: ^15}\t   {: <30}",
+            "  {: >7}    {: >10.3}    {: ^15}    {: <8}    {: >8}     {: ^15}    {: <30}",
             self.pid, duration, self.time, self.syscall, bytes, error, self.fd
         )
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Syscall {
-    Read,
-    Write,
-    Other,
-}
-
-impl From<&str> for Syscall {
-    fn from(syscall_name: &str) -> Syscall {
-        match syscall_name {
-            "read" | "recv" | "recvfrom" | "recvmsg" => Syscall::Read,
-            "send" | "sendmsg" | "sendto" | "write" => Syscall::Write,
-            _ => Syscall::Other,
-        }
-    }
-}
-
-impl fmt::Display for Syscall {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Syscall::Read => write!(f, "read"),
-            Syscall::Write => write!(f, "write"),
-            Syscall::Other => write!(f, "other"),
-        }
     }
 }
 
@@ -83,7 +56,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
             CallStatus::Complete => io_calls.push(IoCall {
                 pid: event.pid,
                 time: event.time,
-                syscall: Syscall::from(event.syscall),
+                syscall: event.syscall,
                 fd: event.file.unwrap_or_default(),
                 bytes: event.rtn_cd.unwrap_or_default(),
                 duration: event.duration.unwrap_or_default(),
@@ -94,7 +67,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                     io_calls.push(IoCall {
                         pid: event.pid,
                         time: event.time,
-                        syscall: Syscall::from(event.syscall),
+                        syscall: event.syscall,
                         fd: event.file.unwrap_or_default(),
                         bytes: next_event.rtn_cd.unwrap_or_default(),
                         duration: next_event.duration.unwrap_or_default(),

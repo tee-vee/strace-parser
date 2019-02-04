@@ -41,11 +41,11 @@ impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
 
 impl<'a> fmt::Display for FileData<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let error = &self.error.unwrap_or("-");
+        let error = self.error.unwrap_or("-");
 
         write!(
             f,
-            "  {0: >10.3}\t{1: ^17}\t   {2: ^15}\t   {3: <30}",
+            "{: >10.3}    {: ^15}    {: ^15}    {: <30}",
             self.duration, self.time, error, self.file
         )
     }

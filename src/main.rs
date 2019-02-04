@@ -112,7 +112,7 @@ fn main() {
             Arg::with_name("io")
                 .short("i")
                 .long("io")
-                .help("List read/writes from 'read', 'recvmsg', 'sendmsg', 'write'"),
+                .help("List read/writes from 'read', 'recvmsg', 'sendmsg', and 'write'"),
         )
         .arg(
             Arg::with_name("pid")

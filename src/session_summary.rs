@@ -307,7 +307,7 @@ impl<'a> SessionSummary<'a> {
                         writeln!(
                             stdout(),
                             "  {:>10}\t{: ^17}\t   {: ^15}\t{: <30}",
-                            "open (ms)",
+                            "dur (ms)",
                             "timestamp",
                             "error",
                             "   file name"
@@ -379,16 +379,16 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nFiles Opened")?;
         writeln!(
             stdout(),
-            "\n  {: >7}\t{: >12}\t{: ^17}\t   {: ^15}\t{: <30}",
+            "\n  {: >7}    {: >10}    {: ^15}    {: ^15}    {: <30}",
             "pid",
-            "open (ms)",
+            "dur (ms)",
             "timestamp",
             "error",
-            "   file name"
+            "file name"
         )?;
         writeln!(
             stdout(),
-            "  -------\t------------\t-----------------\t   ---------------\t   ---------"
+            "  -------    ----------    ---------------    ---------------    ---------"
         )?;
 
         let mut sorted_pids: Vec<_> = file_times.iter().map(|(pid, _)| *pid).collect();
@@ -398,7 +398,7 @@ impl<'a> SessionSummary<'a> {
             let files = &file_times[&pid];
 
             for file in files {
-                writeln!(stdout(), "  {: >7}\t{}", pid, file,)?;
+                writeln!(stdout(), "  {: >7}    {}", pid, file,)?;
             }
         }
         writeln!(stdout())?;
@@ -416,18 +416,18 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nI/O Performed")?;
         writeln!(
             stdout(),
-            "  {: >7}\t{: >13}\t{: ^17}\t{: <5}\t{: >8}\t{: ^15}\t   {: <30}",
+            "  {: >7}    {: >10}    {: ^15}    {: <8}    {: >8}    {: ^15}     {: <30}",
             "pid",
-            "duration (ms)",
+            "dur (ms)",
             "timestamp",
-            "r/w",
+            "syscall",
             "bytes",
             "error",
             "file name"
         )?;
         writeln!(
             stdout(),
-            "  -------\t-------------\t-----------------\t-----\t--------\t---------------\t   ---------"
+            "  -------    ----------    ---------------    --------    --------    ---------------     ---------"
         )?;
 
         for pid in pids_to_print {
