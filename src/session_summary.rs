@@ -1,7 +1,7 @@
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{file_data, file_data::SortFilesBy};
+use crate::{file_data, file_data::SortFilesBy, io};
 use crate::{HashMap, HashSet, Pid, PidPrintAmt, PidSummary, SortBy};
 use chrono::Duration;
 use lazy_static::lazy_static;
@@ -288,7 +288,7 @@ impl<'a> SessionSummary<'a> {
         pids: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(raw_data, &pids, SortFilesBy::Length);
+        let file_times = file_data::files_opened(&pids, raw_data, SortFilesBy::Length);
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
@@ -307,7 +307,7 @@ impl<'a> SessionSummary<'a> {
                         writeln!(
                             stdout(),
                             "  {:>10}\t{: ^17}\t   {: ^15}\t{: <30}",
-                            "open (ms)",
+                            "dur (ms)",
                             "timestamp",
                             "error",
                             "   file name"
@@ -374,21 +374,21 @@ impl<'a> SessionSummary<'a> {
         pids_to_print: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(raw_data, &pids_to_print, SortFilesBy::Time);
+        let file_times = file_data::files_opened(&pids_to_print, raw_data, SortFilesBy::Time);
 
         writeln!(stdout(), "\nFiles Opened")?;
         writeln!(
             stdout(),
-            "\n  {: >7}\t{: ^12}\t{: ^17}\t   {: ^15}\t{: <30}",
+            "\n  {: >7}    {: >10}    {: ^15}    {: ^15}    {: <30}",
             "pid",
-            "open (ms)",
+            "dur (ms)",
             "timestamp",
             "error",
-            "   file name"
+            "file name"
         )?;
         writeln!(
             stdout(),
-            "  -------\t------------\t-----------------\t   ---------------\t   ---------"
+            "  -------    ----------    ---------------    ---------------    ---------"
         )?;
 
         let mut sorted_pids: Vec<_> = file_times.iter().map(|(pid, _)| *pid).collect();
@@ -398,7 +398,43 @@ impl<'a> SessionSummary<'a> {
             let files = &file_times[&pid];
 
             for file in files {
-                writeln!(stdout(), "  {: >7}\t{}", pid, file,)?;
+                writeln!(stdout(), "  {: >7}    {}", pid, file,)?;
+            }
+        }
+        writeln!(stdout())?;
+
+        Ok(())
+    }
+
+    pub fn print_io(
+        &self,
+        pids_to_print: &[Pid],
+        raw_data: &HashMap<Pid, PidData<'a>>,
+    ) -> Result<(), Error> {
+        let io_calls = io::io_calls(pids_to_print, raw_data);
+
+        writeln!(stdout(), "\nI/O Performed")?;
+        writeln!(
+            stdout(),
+            "  {: >7}    {: >10}    {: ^15}    {: <8}    {: >8}    {: ^15}     {: <30}",
+            "pid",
+            "dur (ms)",
+            "timestamp",
+            "syscall",
+            "bytes",
+            "error",
+            "file name"
+        )?;
+        writeln!(
+            stdout(),
+            "  -------    ----------    ---------------    --------    --------    ---------------     ---------"
+        )?;
+
+        for pid in pids_to_print {
+            if let Some(calls) = io_calls.get(pid) {
+                for call in calls {
+                    writeln!(stdout(), "{}", call)?;
+                }
             }
         }
         writeln!(stdout())?;
