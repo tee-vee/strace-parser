@@ -2,24 +2,28 @@ use crate::parser::{CallStatus, RawData};
 use crate::syscall_data::PidData;
 use crate::{HashMap, Pid};
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileData<'a> {
-    time: &'a str,
-    file: &'a str,
-    error: Option<&'a str>,
-    duration: f32,
+    pub pid: Pid,
+    pub time: &'a str,
+    pub file: &'a str,
+    pub error: Option<&'a str>,
+    pub duration: f32,
 }
 
 impl<'a> FileData<'a> {
     fn new(
+        pid: Pid,
         time: &'a str,
         file_opt: Option<&'a str>,
         error: Option<&'a str>,
         duration_opt: Option<f32>,
     ) -> FileData<'a> {
         FileData {
+            pid,
             time,
             file: file_opt.unwrap_or_default(),
             error,
@@ -31,6 +35,7 @@ impl<'a> FileData<'a> {
 impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
     fn from(raw_data: &RawData<'a>) -> FileData<'a> {
         FileData {
+            pid: raw_data.pid,
             time: raw_data.time,
             file: raw_data.file.unwrap_or_default(),
             error: raw_data.error,
@@ -45,8 +50,8 @@ impl<'a> fmt::Display for FileData<'a> {
 
         write!(
             f,
-            "{: >10.3}    {: ^15}    {: ^15}    {: <30}",
-            self.duration, self.time, error, self.file
+            "  {: >7}    {: >10.3}    {: ^15}    {: ^15}    {: <30}",
+            self.pid, self.duration, self.time, error, self.file
         )
     }
 }
@@ -60,9 +65,8 @@ pub fn files_opened<'a>(
     pids: &[Pid],
     raw_data: &HashMap<Pid, PidData<'a>>,
     sort_by: SortFilesBy,
-) -> HashMap<Pid, Vec<FileData<'a>>> {
-    let pid_data: HashMap<_, _> = pids
-        .par_iter()
+) -> BTreeMap<Pid, Vec<FileData<'a>>> {
+    pids.par_iter()
         .map(|pid| {
             let mut open_events = raw_data[pid].open_events.clone();
             open_events.par_sort_unstable_by(|x, y| (x.time).cmp(&y.time));
@@ -79,9 +83,7 @@ pub fn files_opened<'a>(
             }
             (*pid, coalesced_data)
         })
-        .collect();
-
-    pid_data
+        .collect()
 }
 
 fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
@@ -92,6 +94,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
         match entry.call_status {
             CallStatus::Complete => {
                 complete_entries.push(FileData::new(
+                    entry.pid,
                     entry.time,
                     entry.file,
                     entry.error,
@@ -101,6 +104,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
             CallStatus::Started => {
                 if let Some(next_entry) = iter.next() {
                     complete_entries.push(FileData::new(
+                        entry.pid,
                         entry.time,
                         entry.file,
                         next_entry.error,
