@@ -1,6 +1,6 @@
 use crate::syscall_data::PidData;
-use crate::Pid;
 use crate::HashMap;
+use crate::Pid;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,7 +20,7 @@ impl<'a> fmt::Display for SyscallStats<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "  {0: <15}\t{1: >8}\t{2: >10.3}\t{3: >10.3}\t{4: >10.3}\t{5: >10.3}\t",
+            "{0: <15}    {1: >8}    {2: >10.3}    {3: >10.3}    {4: >10.3}    {5: >10.3}    ",
             self.name, self.count, self.total, self.max, self.avg, self.min
         )?;
 
