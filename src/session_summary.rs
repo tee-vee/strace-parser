@@ -212,7 +212,7 @@ impl<'a> SessionSummary<'a> {
 
         writeln!(
             stdout(),
-            "  {: <7}\t{: >10}\t{: >10}\t{: >10}\t{: >9}\t{: >9}\t{: >9}",
+            "  {: <7}    {: >10}    {: >10}    {: >10}    {: >9}    {: >9}    {: >9}",
             "pid",
             "actv (ms)",
             "wait (ms)",
@@ -223,13 +223,13 @@ impl<'a> SessionSummary<'a> {
         )?;
         writeln!(
             stdout(),
-            "  -------\t----------\t----------\t----------\t---------\t---------\t---------"
+            "  -------    ----------    ----------    ----------    ---------    ---------    ---------"
         )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
             writeln!(
                 stdout(),
-                "  {: <7}\t{: >10.3}\t{: >10.3}\t{: >10.3}\t{: >8.2}%\t{: >9}\t{: >9}",
+                "  {: <7}    {: >10.3}    {: >10.3}    {: >10.3}    {: >8.2}%    {: >9}    {: >9}",
                 pid,
                 pid_summary.active_time,
                 pid_summary.wait_time,
@@ -306,19 +306,19 @@ impl<'a> SessionSummary<'a> {
                         writeln!(stdout(), "  Slowest file open times for PID {}:\n", pid)?;
                         writeln!(
                             stdout(),
-                            "  {:>10}\t{: ^17}\t   {: ^15}\t{: <30}",
+                            "  {:>10}    {: ^15}    {: ^15}    {: <30}",
                             "dur (ms)",
                             "timestamp",
                             "error",
-                            "   file name"
+                            "file name"
                         )?;
                         writeln!(
                             stdout(),
-                            "  ----------\t-----------------\t   ---------------\t   ---------"
+                            "  ----------    ---------------    ---------------    ---------"
                         )?;
 
                         for file in pid_files.iter().take(10) {
-                            writeln!(stdout(), "{}", file)?;
+                            writeln!(stdout(), "  {}", file)?;
                         }
                     }
                 }
@@ -337,15 +337,12 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nPrograms Executed\n")?;
         writeln!(
             stdout(),
-            "  {: >7}\t{: ^30}\t{: <}",
+            "  {: >7}    {: ^30}    {: <}",
             "pid",
             "program",
             "args",
         )?;
-        writeln!(
-            stdout(),
-            "  -------\t          ---------            \t--------"
-        )?;
+        writeln!(stdout(), "  -------    ---------    --------")?;
 
         let pids = match print_type {
             PidPrintAmt::All => self
@@ -360,7 +357,7 @@ impl<'a> SessionSummary<'a> {
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 if let Some((cmd, args)) = pid_summary.format_execve() {
-                    writeln!(stdout(), "  {: >7}\t{: ^30}\t{: <}", pid, cmd, args)?;
+                    writeln!(stdout(), "  {: >7}    {: ^30}    {: <}", pid, cmd, args)?;
                 }
             }
         }
@@ -400,7 +397,7 @@ impl<'a> SessionSummary<'a> {
         open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
 
         for event in open_events {
-            writeln!(stdout(), "{}", event,)?;
+            writeln!(stdout(), "  {: >7}    {}", event.pid, event,)?;
         }
 
         writeln!(stdout())?;

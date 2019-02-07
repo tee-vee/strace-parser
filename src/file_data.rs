@@ -50,8 +50,8 @@ impl<'a> fmt::Display for FileData<'a> {
 
         write!(
             f,
-            "  {: >7}    {: >10.3}    {: ^15}    {: ^15}    {: <30}",
-            self.pid, self.duration, self.time, error, self.file
+            "{: >10.3}    {: ^15}    {: ^15}    {: <30}",
+            self.duration, self.time, error, self.file
         )
     }
 }

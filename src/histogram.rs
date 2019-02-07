@@ -24,19 +24,14 @@ pub fn print_histogram(
     writeln!(stdout(), "\n  syscall: {}\n  pids: {}\n", syscall, pid_list)?;
     writeln!(
         stdout(),
-        "    {0: <4}   {1: <4}\t{2: >10}\t {3: <10}",
+        "       {: ^5}        {: >8}     {: <12}",
         "\u{03BC}secs",
-        "",
         "count",
         "distribution",
     )?;
     writeln!(
         stdout(),
-        "    {0: >4}----{1: <4}\t{2: >10}\t {3: <10}",
-        "----",
-        "----",
-        "--------",
-        "----------------------------------------",
+        "    ------------    --------     ----------------------------------------",
     )?;
 
     for (pow, count) in distribution.iter().skip_while(|(_, count)| **count == 0) {
@@ -56,7 +51,7 @@ pub fn print_histogram(
 
         writeln!(
             stdout(),
-            "    {: >4} -> {: <4}\t{: >10}\t|{: <40}|",
+            "    {: >4} -> {: <4}    {: >8}    |{: <40}|",
             low_desc,
             high_desc,
             *count,
