@@ -223,7 +223,8 @@ fn main() {
 
     let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
 
-    let print_status = match sub_cmd {
+    // ignore result as we expect failures when piping to head
+    let _print_status = match sub_cmd {
         SubCmd::Pid => {
             let pid_strs: HashSet<_> = app_matches.values_of("pid").unwrap().collect();
             let pids: Vec<_> = pid_strs
@@ -283,8 +284,4 @@ fn main() {
             }
         }
     };
-
-    if print_status.is_err() {
-        std::process::exit(1);
-    }
 }

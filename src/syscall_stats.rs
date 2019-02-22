@@ -21,13 +21,13 @@ impl<'a> fmt::Display for SyscallStats<'a> {
         if self.count > 0 {
             write!(
                 f,
-                "{0: <15}    {1: >8}    {2: >10.3}    {3: >10.3}    {4: >10.3}    {5: >10.3}    ",
+                "{0: <17}    {1: >8}    {2: >10.3}    {3: >10.3}    {4: >10.3}    {5: >10.3}    ",
                 self.name, self.count, self.total, self.max, self.avg, self.min
             )?;
         } else {
             write!(
                 f,
-                "{0: <15}    {1: >8}    {2: >10}    {3: >10}    {4: >10}    {5: >10}    ",
+                "{0: <17}    {1: >8}    {2: >10}    {3: >10}    {4: >10}    {5: >10}    ",
                 self.name, "1", "n/a", "n/a", "n/a", "n/a"
             )?;
         }
