@@ -3,9 +3,12 @@
 use self::pid_summary::PidSummary;
 use self::session_summary::SessionSummary;
 use self::sort_by::SortBy;
-use clap::{App, Arg, ArgGroup};
+use clap::{App, Arg, ArgGroup, ArgMatches};
 use fxhash::FxBuildHasher;
-use std::fs;
+use memmap::MmapOptions;
+use std::error::Error;
+use std::fs::File;
+use std::str;
 
 mod check_flags;
 mod file_data;
@@ -158,6 +161,16 @@ fn main() {
         )
         .get_matches();
 
+    match execute(app_matches) {
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+        _ => {}
+    };
+}
+
+fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
     let sub_cmd = if app_matches.is_present("pid") {
         SubCmd::Pid
     } else {
@@ -195,15 +208,10 @@ fn main() {
         }
     };
 
-    let file_name = app_matches.value_of("INPUT").unwrap();
-
-    let buffer = match fs::read_to_string(file_name) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("File: {} -- {}", file_name, e);
-            std::process::exit(1);
-        }
-    };
+    let file_name = app_matches.value_of("INPUT").ok_or("Missing filename")?;
+    let file = File::open(file_name)?;
+    let mmap = unsafe { MmapOptions::new().map(&file) }?;
+    let buffer = str::from_utf8(&mmap)?;
 
     if buffer.is_empty() {
         eprintln!("Error: {} is empty", file_name);
@@ -223,15 +231,19 @@ fn main() {
 
     let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
 
-    // ignore result as we expect failures when piping to head
-    let _print_status = match sub_cmd {
+    match sub_cmd {
         SubCmd::Pid => {
-            let pid_strs: HashSet<_> = app_matches.values_of("pid").unwrap().collect();
+            let pid_strs: HashSet<_> = app_matches
+                .values_of("pid")
+                .ok_or("No pids entered")?
+                .collect();
+
             let pids: Vec<_> = pid_strs
                 .into_iter()
-                .map(|p| p.parse::<Pid>().unwrap())
+                .filter_map(|p| p.parse::<Pid>().ok())
                 .collect();
-            let checked_pids = session_summary.validate_pids(&pids).unwrap();
+
+            let checked_pids = session_summary.validate_pids(&pids)?;
 
             let (pids_to_print, print_type) = if app_matches.is_present("related") {
                 let related_pids = session_summary.related_pids(&checked_pids);
@@ -240,7 +252,8 @@ fn main() {
                 (checked_pids, PidPrintAmt::Listed)
             };
 
-            match print_mode {
+            // ignore result as we expect failures when piping to head
+            let _result = match print_mode {
                 PrintMode::Exec => session_summary.print_exec_list(&pids_to_print, print_type),
                 PrintMode::Open => {
                     session_summary.print_opened_files(&pids_to_print, &syscall_data)
@@ -250,7 +263,7 @@ fn main() {
                 }
                 PrintMode::Io => session_summary.print_io(&pids_to_print, &syscall_data),
                 _ => session_summary.print_pid_details(&pids_to_print, &syscall_data),
-            }
+            };
         }
         SubCmd::Summary => {
             let sort_by = match app_matches.value_of("sort_by") {
@@ -263,12 +276,13 @@ fn main() {
             };
 
             let count_to_print = if let Some(count) = app_matches.value_of("count") {
-                count.parse::<usize>().unwrap()
+                count.parse::<usize>()?
             } else {
                 25
             };
 
-            match print_mode {
+            // ignore result as we expect failures when piping to head
+            let _result = match print_mode {
                 PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
                 PrintMode::Exec => {
                     session_summary.print_exec_list(&session_summary.pids(), PidPrintAmt::All)
@@ -281,7 +295,9 @@ fn main() {
                 }
                 PrintMode::Io => session_summary.print_io(&session_summary.pids(), &syscall_data),
                 _ => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
-            }
+            };
         }
-    };
+    }
+
+    Ok(())
 }
