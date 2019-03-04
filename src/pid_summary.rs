@@ -60,7 +60,7 @@ impl<'a> PidSummary<'a> {
                 .map(|a| a.trim_end_matches(","))
                 .fold(String::new(), |s, arg| s + arg + " ");
 
-            if execve.iter().any(|s| s.ends_with("],")) {
+            if execve.iter().any(|s| s.ends_with("],")) && args.len() > 1 {
                 args.insert(0, '[');
             }
 
