@@ -2,6 +2,8 @@
 
 A small tool to analyze raw `strace` data.
 
+Similar to output provided by the `-c` flag, but with more details and capable of handling multiple PIDs.
+
 It can generate the following metrics:
    * A summary of the top processes, including total syscalls and time spent
    * Statistics on each type of syscall made for a given number of proccesses
@@ -188,4 +190,132 @@ Which field to sort base summary and `-d/--details` by
    pid   # PID number
    syscalls   # The number of syscalls made by the PID
    total_time   # All time the PID was alive, includes waiting tasks
+```
+
+### Interpreting Output
+
+`strace` will significantly slow down syscalls execution, so do not consider the times listed as accurate when comparing to how a program performs normally.
+
+That said, it is very useful for understanding what calls are made and their _relative_ cost.  
+
+Here's a comparison of two git processes on different infrastructure.
+
+  * Example 1 spends ~90 out of 112ms on I/O operations `read`, `open`, and `close`.
+  * Example 2 is not bound by a specific type of action, but syscalls in general are slower.
+    * 59 calls to `rt_sigaction` take 1ms for example 1, but 21ms for example 2.
+    * 33 calls to `mmap` take < 1ms for example 1, but 27 calls to it take 12ms for example 2.
+    * Most other syscalls are significantly slower, with the exceptions of calls that rely on the filesystem.
+
+Based on this, we can say that example 1 is bottlenecked by block I/O, while example 2 is bound by general system performance - perhaps high load.
+
+#### Example 1
+
+```
+PID 97266
+303 syscalls, active time: 112.503ms, total time: 112.503ms
+
+  syscall                 count    total (ms)      max (ms)      avg (ms)      min (ms)    errors
+  -----------------    --------    ----------    ----------    ----------    ----------    --------
+  read                       30        43.257        37.403         1.442         0.011    ERESTARTSYS: 1
+  close                      24        27.824        12.166         1.159         0.012
+  open                       29        19.730         5.053         0.680         0.013    ENOENT: 7
+  access                     21         6.892         0.988         0.328         0.013    ENOENT: 13
+  lstat                       5         2.974         1.142         0.595         0.019    ENOENT: 4
+  stat                       15         2.862         0.575         0.191         0.013    ENOENT: 3
+  openat                      2         2.486         1.872         1.243         0.614
+  getdents                    4         2.150         1.796         0.538         0.011
+  rt_sigaction               59         1.111         0.121         0.019         0.010
+  mmap                       33         0.838         0.066         0.025         0.012
+  fstat                      29         0.670         0.116         0.023         0.011
+  mprotect                   14         0.432         0.100         0.031         0.014
+  munmap                      8         0.212         0.089         0.026         0.014
+  write                       6         0.181         0.036         0.030         0.023
+  execve                      1         0.175         0.175         0.175         0.175
+  brk                         4         0.157         0.085         0.039         0.015
+  rt_sigprocmask              3         0.130         0.084         0.043         0.018
+  lseek                       2         0.089         0.074         0.045         0.015
+  fcntl                       4         0.083         0.032         0.021         0.015
+  set_robust_list             1         0.065         0.065         0.065         0.065
+  dup2                        3         0.061         0.035         0.020         0.011
+  getrlimit                   2         0.044         0.027         0.022         0.017
+  arch_prctl                  1         0.026         0.026         0.026         0.026
+  set_tid_address             1         0.022         0.022         0.022         0.022
+  getcwd                      1         0.020         0.020         0.020         0.020
+  setpgid                     1         0.012         0.012         0.012         0.012
+  ---------------
+
+  Program Executed: /opt/gitlab/embedded/bin/git
+  Args: ["--git-dir" "/gitlab-data/git-data/repositories/group_name/project.git" "cat-file" "--batch"]
+
+  Parent PID:  118534
+
+  Slowest file open times for PID 97266:
+
+    dur (ms)       timestamp            error         file name
+  ----------    ---------------    ---------------    ---------
+       5.053    08:42:44.933863           -           /gitlab-data/git-data/repositories/group_name/project.git/config
+       3.115    08:42:44.925575           -           /gitlab-data/git-data/repositories/group_name/project.git/config
+       2.653    08:42:44.898632           -           /gitlab-data/git-data/repositories/group_name/project.git/config
+       2.239    08:42:44.916090           -           /gitlab-data/home/.gitconfig
+       1.972    08:42:44.983603           -           /gitlab-data/git-data/repositories/group_name/project.git/packed-refs
+       1.921    08:42:44.891691           -           /gitlab-data/git-data/repositories/group_name/project.git/HEAD
+       1.872    08:42:44.981307           -           /gitlab-data/git-data/repositories/group_name/project.git/refs/
+       1.831    08:42:44.930141           -           /gitlab-data/home/.gitconfig
+       0.614    08:42:44.987032           -           /gitlab-data/git-data/repositories/group_name/project.git/objects/pack
+       0.342    08:42:44.997547        ENOENT         /gitlab-data/git-data/repositories/group_name/project.git/objects/info/alternates
+```
+
+#### Example 2
+
+```
+PID 64205
+243 syscalls, active time: 120.542ms, total time: 120.542ms
+
+  syscall                 count    total (ms)      max (ms)      avg (ms)      min (ms)    errors
+  -----------------    --------    ----------    ----------    ----------    ----------    --------
+  rt_sigaction               59        21.174         0.908         0.359         0.110
+  open                       23        13.623         1.464         0.592         0.200    ENOENT: 6
+  mmap                       27        12.203         1.116         0.452         0.163
+  read                       23        11.897         0.998         0.517         0.221
+  fstat                      24        11.276         0.770         0.470         0.155
+  close                      19        11.176         1.024         0.588         0.234
+  access                     11         8.197         1.492         0.745         0.247    ENOENT: 3
+  lstat                       5         6.525         2.624         1.305         0.627    ENOENT: 4
+  mprotect                   14         4.998         0.798         0.357         0.208
+  munmap                      8         3.646         0.820         0.456         0.212
+  stat                        7         2.997         0.629         0.428         0.155    ENOENT: 3
+  getdents                    4         2.870         0.865         0.717         0.538
+  brk                         4         1.784         0.597         0.446         0.351
+  openat                      2         1.735         0.918         0.867         0.817
+  dup2                        3         1.451         0.652         0.484         0.196
+  execve                      1         1.301         1.301         1.301         1.301
+  rt_sigprocmask              3         1.223         0.488         0.408         0.266
+  getcwd                      1         0.557         0.557         0.557         0.557
+  set_robust_list             1         0.466         0.466         0.466         0.466
+  set_tid_address             1         0.452         0.452         0.452         0.452
+  getrlimit                   1         0.419         0.419         0.419         0.419
+  setpgid                     1         0.382         0.382         0.382         0.382
+  arch_prctl                  1         0.190         0.190         0.190         0.190
+  exit_group                  1           n/a           n/a           n/a           n/a
+  ---------------
+
+  Program Executed: /opt/gitlab/embedded/bin/git
+  Args: ["--git-dir" "/var/opt/gitlab-data/git-data/repositories/group_name/project.git" "for-each-ref" "--format=%(refname)" "refs/tags"]
+
+  Parent PID:  30154
+
+  Slowest file open times for PID 64205:
+
+    dur (ms)       timestamp            error         file name
+  ----------    ---------------    ---------------    ---------
+       1.464    14:38:21.803101           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/packed-refs
+       1.237    14:38:21.749569           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/config
+       1.166    14:38:21.711738           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/config
+       0.979    14:38:21.736315           -           /var/opt/gitlab-data/home/.gitconfig
+       0.938    14:38:21.702572           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/HEAD
+       0.918    14:38:21.788967           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/refs/
+       0.836    14:38:21.664860           -           /lib64/librt.so.1
+       0.817    14:38:21.796232           -           /var/opt/gitlab-data/git-data/repositories/group_name/project.git/refs/tags/
+       0.739    14:38:21.775371           -           /var/opt/gitlab-data/home/.gitconfig
+       0.598    14:38:21.663682        ENOENT         /opt/gitlab/embedded/lib/librt.so.1
 ```
