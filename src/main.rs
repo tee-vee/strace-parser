@@ -10,17 +10,17 @@ use std::error::Error;
 use std::fs::File;
 use std::str;
 
-mod check_flags;
-mod file_data;
-mod histogram;
-mod io;
-mod parser;
-mod pid_summary;
-mod real_time;
-mod session_summary;
-mod sort_by;
-mod syscall_data;
-mod syscall_stats;
+pub mod check_flags;
+pub mod file_data;
+pub mod histogram;
+pub mod io;
+pub mod parser;
+pub mod pid_summary;
+pub mod real_time;
+pub mod session_summary;
+pub mod sort_by;
+pub mod syscall_data;
+pub mod syscall_stats;
 
 type Pid = i32;
 type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
