@@ -1,13 +1,40 @@
+use crate::real_time::parse_unix_timestamp;
+use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
+use crate::HashSet;
 use crate::Pid;
+use chrono::NaiveTime;
+use lazy_static::lazy_static;
+use rayon::prelude::*;
 use std::fmt;
 use std::io::{prelude::*, stdout, Error};
+
+lazy_static! {
+    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
+        let mut s = HashSet::default();
+        s.insert("epoll_ctl");
+        s.insert("epoll_wait");
+        s.insert("epoll_pwait");
+        s.insert("futex");
+        s.insert("nanosleep");
+        s.insert("restart_syscall");
+        s.insert("poll");
+        s.insert("ppoll");
+        s.insert("pselect");
+        s.insert("pselect6");
+        s.insert("select");
+        s.insert("wait4");
+        s.insert("waitid");
+        s
+    };
+}
 
 #[derive(Clone)]
 pub struct PidSummary<'a> {
     pub syscall_count: i32,
-    pub active_time: f32,
-    pub wait_time: f32,
+    pub system_active_time: f32,
+    pub system_wait_time: f32,
+    pub user_time: f32,
     pub total_time: f32,
     pub syscall_stats: Vec<SyscallStats<'a>>,
     pub parent_pid: Option<Pid>,
@@ -24,8 +51,8 @@ impl<'a> fmt::Display for PidSummary<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{} syscalls, active time: {:.3}ms, total time: {:.3}ms\n",
-            self.syscall_count, self.active_time, self.total_time
+            "{} syscalls, active time: {:.3}ms, user time: {:.3}ms, total time: {:.3}ms\n",
+            self.syscall_count, self.system_active_time, self.user_time, self.total_time
         )?;
         writeln!(
             f,
@@ -41,6 +68,48 @@ impl<'a> fmt::Display for PidSummary<'a> {
         }
 
         Ok(())
+    }
+}
+
+impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
+    fn from(input: (&[SyscallStats<'a>], &PidData<'a>)) -> Self {
+        let (syscall_stats, pid_data) = input;
+
+        let syscall_count = syscall_stats
+            .par_iter()
+            .fold_with(0, |acc, event_stats| acc + event_stats.count)
+            .sum();
+
+        let system_active_time = syscall_stats
+            .par_iter()
+            .filter(|stat| !WAIT_SYSCALLS.contains(stat.name))
+            .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
+            .sum();
+
+        let system_wait_time = syscall_stats
+            .par_iter()
+            .filter(|stat| WAIT_SYSCALLS.contains(stat.name))
+            .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
+            .sum();
+
+        let start_time = pid_data.start_time;
+        let end_time = pid_data.end_time;
+
+        let total_time = PidSummary::calc_total_time(start_time, end_time);
+
+        let user_time = total_time - system_active_time - system_wait_time;
+
+        PidSummary {
+            syscall_count,
+            system_active_time,
+            system_wait_time,
+            user_time,
+            total_time,
+            syscall_stats: syscall_stats.to_vec(),
+            parent_pid: None,
+            child_pids: pid_data.child_pids.clone(),
+            execve: pid_data.execve.clone(),
+        }
     }
 }
 
@@ -119,5 +188,19 @@ impl<'a> PidSummary<'a> {
         }
 
         Ok(())
+    }
+
+    fn calc_total_time(start: &str, end: &str) -> f32 {
+        let st = NaiveTime::parse_from_str(start, "%H:%M:%S%.6f");
+        let et = NaiveTime::parse_from_str(end, "%H:%M:%S%.6f");
+
+        if let (Some(s), Some(e)) = (st.ok(), et.ok()) {
+            (e - s).num_microseconds().unwrap() as f32 / 1000.0
+        } else if let (Some(s), Some(e)) = (parse_unix_timestamp(start), parse_unix_timestamp(end))
+        {
+            (e - s).num_microseconds().unwrap() as f32 / 1000.0
+        } else {
+            0.0
+        }
     }
 }

@@ -7,6 +7,7 @@ pub enum SortBy {
     Pid,
     SyscallCount,
     TotalTime,
+    UserTime,
 }
 
 impl fmt::Display for SortBy {
@@ -17,6 +18,7 @@ impl fmt::Display for SortBy {
             SortBy::Pid => write!(f, "PID #"),
             SortBy::SyscallCount => write!(f, "Syscall Count"),
             SortBy::TotalTime => write!(f, "Total Time"),
+            SortBy::UserTime => write!(f, "User Time"),
         }
     }
 }
