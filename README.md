@@ -16,6 +16,12 @@ It can generate the following metrics:
 **NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
 to be captured
 
+### Building
+
+You'll need the Rust compiler, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
+
+On stable build with `cargo build --release`.  On nightly you can use `cargo build --release --features nightly` for a ~10% performance boost.
+
 ### Commands
 
 Usage: `strace-parser [FLAGS] [OPTIONS] <INPUT>`
@@ -35,9 +41,10 @@ Top 2 PIDs by Active Time
   18741  	   374.363	 10112.698	 10487.062	   65.85%	     4098	        0
   17021  	    67.277	 11131.771	 11199.049	   11.83%	     1473	        0
 
-Total PIDs: 101
-System Time: 1843.512939s
-Real Time: 60.60968s
+PIDs   101
+real   1m0.609s
+user   0m36.305s
+sys    12m17.512s
 ```
 
 ---
@@ -189,7 +196,8 @@ Which field to sort base summary and `-d/--details` by
    children   # The number of child PIDs created by PID
    pid   # PID number
    syscalls   # The number of syscalls made by the PID
-   total_time   # All time the PID was alive, includes waiting tasks
+   total_time   # Time PID was alive, includes waiting
+   user_time   # Time spent by PID on userland tasks
 ```
 
 ### Interpreting Output
