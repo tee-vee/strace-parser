@@ -22,6 +22,8 @@ impl<'a> SyscallData<'a> {
 #[derive(Clone, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
+    pub start_time: &'a str,
+    pub end_time: &'a str,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
@@ -32,6 +34,8 @@ impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
             syscall_data: HashMap::default(),
+            start_time: "zzzzz", // greater than any valid time str
+            end_time: "00000",   // less than any valid time str
             child_pids: Vec::new(),
             open_events: Vec::new(),
             io_events: Vec::new(),
@@ -67,6 +71,14 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
 
     if let Some(duration) = raw_data.duration {
         syscall_entry.lengths.push(duration);
+    }
+
+    if raw_data.time < pid_entry.start_time {
+        pid_entry.start_time = raw_data.time;
+    }
+
+    if raw_data.time > pid_entry.end_time {
+        pid_entry.end_time = raw_data.time;
     }
 
     if let Some(error) = raw_data.error {
@@ -116,6 +128,14 @@ fn coalesce_pid_data<'a>(
                 let error_entry = syscall_entry.errors.entry(error).or_insert(0);
                 *error_entry += count;
             }
+        }
+
+        if temp_pid_data.start_time < pid_entry.start_time {
+            pid_entry.start_time = temp_pid_data.start_time;
+        }
+
+        if temp_pid_data.end_time > pid_entry.end_time {
+            pid_entry.end_time = temp_pid_data.end_time;
         }
 
         pid_entry.child_pids.extend(temp_pid_data.child_pids);
@@ -181,5 +201,27 @@ mod tests {
         let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
         let pid_data_map = build_syscall_data(&input);
         assert!(pid_data_map[&13656].execve.is_some());
+    }
+
+    #[test]
+    fn pid_data_captures_start_time() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!("10:53:02.442246", pid_data_map[&13656].start_time,);
+    }
+
+    #[test]
+    fn pid_data_captures_end_time() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!("10:53:02.442246", pid_data_map[&13656].end_time,);
+    }
+
+    #[test]
+    fn pid_data_updates_end_time() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
+13656 12:00:00.000000 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...> "##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!("12:00:00.000000", pid_data_map[&13656].end_time,);
     }
 }

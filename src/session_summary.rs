@@ -2,9 +2,8 @@ use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::{file_data, file_data::SortFilesBy, io};
-use crate::{HashMap, HashSet, Pid, PidPrintAmt, PidSummary, SortBy};
+use crate::{HashMap, Pid, PidPrintAmt, PidSummary, SortBy};
 use chrono::Duration;
-use lazy_static::lazy_static;
 use petgraph::prelude::*;
 use rayon::prelude::*;
 use std::collections::BTreeSet;
@@ -12,30 +11,11 @@ use std::io::{prelude::*, stdout, Error};
 
 static PRINT_COUNT: usize = 10;
 
-lazy_static! {
-    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
-        let mut s = HashSet::default();
-        s.insert("epoll_ctl");
-        s.insert("epoll_wait");
-        s.insert("epoll_pwait");
-        s.insert("futex");
-        s.insert("nanosleep");
-        s.insert("restart_syscall");
-        s.insert("poll");
-        s.insert("ppoll");
-        s.insert("pselect");
-        s.insert("pselect6");
-        s.insert("select");
-        s.insert("wait4");
-        s.insert("waitid");
-        s
-    };
-}
-
 pub struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
     all_time: f32,
     all_active_time: f32,
+    all_user_time: f32,
 }
 
 impl<'a> SessionSummary<'a> {
@@ -47,40 +27,13 @@ impl<'a> SessionSummary<'a> {
             pid_summaries: HashMap::default(),
             all_time: 0.0,
             all_active_time: 0.0,
+            all_user_time: 0.0,
         };
 
         for (pid, syscall_stats) in session_stats {
-            let syscall_count = syscall_stats
-                .par_iter()
-                .fold_with(0, |acc, event_stats| acc + event_stats.count)
-                .sum();
-
-            let active_time = syscall_stats
-                .par_iter()
-                .filter(|stat| !WAIT_SYSCALLS.contains(stat.name))
-                .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
-                .sum();
-
-            let wait_time = syscall_stats
-                .par_iter()
-                .filter(|stat| WAIT_SYSCALLS.contains(stat.name))
-                .fold_with(0.0, |acc, event_stats| acc + event_stats.total)
-                .sum();
-
-            let total_time = active_time + wait_time;
-
             summary.pid_summaries.insert(
                 *pid,
-                PidSummary {
-                    syscall_count,
-                    active_time,
-                    wait_time,
-                    total_time,
-                    syscall_stats: syscall_stats.clone(),
-                    parent_pid: None,
-                    child_pids: pid_data[&pid].child_pids.clone(),
-                    execve: pid_data[&pid].execve.clone(),
-                },
+                PidSummary::from((syscall_stats.as_slice(), &pid_data[pid])),
             );
         }
 
@@ -93,7 +46,15 @@ impl<'a> SessionSummary<'a> {
         summary.all_active_time = summary
             .pid_summaries
             .par_iter()
-            .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.active_time)
+            .fold_with(0.0, |acc, (_, pid_summary)| {
+                acc + pid_summary.system_active_time
+            })
+            .sum();
+
+        summary.all_user_time = summary
+            .pid_summaries
+            .par_iter()
+            .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.user_time)
             .sum();
 
         let pid_graph = summary.build_pid_graph();
@@ -119,8 +80,8 @@ impl<'a> SessionSummary<'a> {
         match sort_by {
             SortBy::ActiveTime => {
                 sorted_summaries.par_sort_by(|(_, x), (_, y)| {
-                    (y.active_time)
-                        .partial_cmp(&x.active_time)
+                    (y.system_active_time)
+                        .partial_cmp(&x.system_active_time)
                         .expect("Invalid comparison on active times")
                 });
             }
@@ -140,6 +101,13 @@ impl<'a> SessionSummary<'a> {
                     (y.total_time)
                         .partial_cmp(&x.total_time)
                         .expect("Invalid comparison on total times")
+                });
+            }
+            SortBy::UserTime => {
+                sorted_summaries.par_sort_by(|(_, x), (_, y)| {
+                    (y.user_time)
+                        .partial_cmp(&x.user_time)
+                        .expect("Invalid comparison on user times")
                 });
             }
         }
@@ -212,10 +180,11 @@ impl<'a> SessionSummary<'a> {
 
         writeln!(
             stdout(),
-            "  {: <7}    {: >10}    {: >10}    {: >10}    {: >9}    {: >9}    {: >9}",
+            "  {: <7}    {: >10}    {: >10}    {: >10}    {: >10}    {: >9}    {: >9}    {: >9}",
             "pid",
             "actv (ms)",
             "wait (ms)",
+            "user (ms)",
             "total (ms)",
             "% of actv",
             "syscalls",
@@ -223,24 +192,26 @@ impl<'a> SessionSummary<'a> {
         )?;
         writeln!(
             stdout(),
-            "  -------    ----------    ----------    ----------    ---------    ---------    ---------"
+            "  -------    ----------    ----------    ----------    ----------    ---------    ---------    ---------"
         )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
             writeln!(
                 stdout(),
-                "  {: <7}    {: >10.3}    {: >10.3}    {: >10.3}    {: >8.2}%    {: >9}    {: >9}",
+                "  {: <7}    {: >10.3}    {: >10.3}    {: >10.3}    {: >10.3}    {: >8.2}%    {: >9}    {: >9}",
                 pid,
-                pid_summary.active_time,
-                pid_summary.wait_time,
+                pid_summary.system_active_time,
+                pid_summary.system_wait_time,
+                pid_summary.user_time,
                 pid_summary.total_time,
-                pid_summary.active_time / self.all_active_time * 100.0,
+                pid_summary.system_active_time / self.all_active_time * 100.0,
                 pid_summary.syscall_count,
                 pid_summary.child_pids.len(),
             )?;
         }
         writeln!(stdout(), "\nTotal PIDs: {}", self.pid_summaries.len())?;
         writeln!(stdout(), "System Time: {:.6}s", self.all_time / 1000.0)?;
+        writeln!(stdout(), "User Time: {:.6}s", self.all_user_time / 1000.0)?;
         if let Some(real_time) = elapsed_time {
             writeln!(
                 stdout(),
@@ -342,7 +313,10 @@ impl<'a> SessionSummary<'a> {
             "program",
             "args",
         )?;
-        writeln!(stdout(), "  -------    ---------    --------")?;
+        writeln!(
+            stdout(),
+            "  -------              ---------               ------"
+        )?;
 
         let pids = match print_type {
             PidPrintAmt::All => self
@@ -481,7 +455,7 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        assert_eq!(summary.pid_summaries[&566].active_time, 3000.0);
+        assert_eq!(summary.pid_summaries[&566].system_active_time, 3000.0);
     }
 
     #[test]
@@ -494,20 +468,20 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        assert_eq!(summary.pid_summaries[&566].wait_time, 2000.0);
+        assert_eq!(summary.pid_summaries[&566].system_wait_time, 2000.0);
     }
 
     #[test]
     fn pid_summary_total_time_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
-566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
-566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
-566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let input = r##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+566   00:09:50.000000 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
+566   00:09:51.000000 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
+566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        assert_eq!(summary.pid_summaries[&566].total_time, 5000.0);
+        assert_eq!(summary.pid_summaries[&566].total_time, 4000.0);
     }
 
     #[test]
