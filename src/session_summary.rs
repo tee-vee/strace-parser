@@ -209,17 +209,24 @@ impl<'a> SessionSummary<'a> {
                 pid_summary.child_pids.len(),
             )?;
         }
-        writeln!(stdout(), "\nTotal PIDs: {}", self.pid_summaries.len())?;
-        writeln!(stdout(), "System Time: {:.6}s", self.all_time / 1000.0)?;
-        writeln!(stdout(), "User Time: {:.6}s", self.all_user_time / 1000.0)?;
+        writeln!(stdout(), "\nPIDs   {}", self.pid_summaries.len())?;
         if let Some(real_time) = elapsed_time {
             writeln!(
                 stdout(),
-                "Real Time: {}.{}s",
-                real_time.num_seconds(),
-                real_time.num_milliseconds()
+                "real   {}",
+                SessionSummary::format_duration(real_time.num_milliseconds()),
             )?;
         }
+        writeln!(
+            stdout(),
+            "user   {}",
+            SessionSummary::format_duration(self.all_user_time as i64)
+        )?;
+        writeln!(
+            stdout(),
+            "sys    {}",
+            SessionSummary::format_duration(self.all_active_time as i64)
+        )?;
 
         Ok(())
     }
@@ -423,6 +430,16 @@ impl<'a> SessionSummary<'a> {
     pub fn pids(&self) -> Vec<Pid> {
         let pids: Vec<_> = self.pid_summaries.keys().cloned().collect();
         pids
+    }
+
+    fn format_duration(millis: i64) -> String {
+        let dur = Duration::milliseconds(millis);
+
+        let mins = dur.num_minutes();
+        let secs = dur.num_seconds() - mins * 60;
+        let ms = dur.num_milliseconds() - secs * 1000 - mins * 60 * 1000;
+
+        format!("{}m{}.{:03}s", mins, secs, ms)
     }
 }
 
