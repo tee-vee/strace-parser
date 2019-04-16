@@ -2,8 +2,8 @@
 
 use criterion::{criterion_group, criterion_main, Benchmark, Criterion, Throughput};
 use rayon::prelude::*;
-use strace_parser::parser::parse_line;
-use strace_parser::syscall_data::build_syscall_data;
+use strace_parse::parser::parse_line;
+use strace_parse::syscall_data::build_syscall_data;
 
 #[path = "../src/main.rs"]
 mod strace_parser;

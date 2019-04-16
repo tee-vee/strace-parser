@@ -1,0 +1,13 @@
+[package]
+name = "strace-parse"
+version = "0.4.0"
+authors = ["Will Chandler <wchandler@gitlab.com>"]
+edition = "2018"
+
+[dependencies]
+chrono = "0.4"
+fxhash = "0.2.1"
+lazy_static = "1.2.0"
+petgraph = "0.4.13"
+rayon = "1.0"
+rayon-hash = "0.4.1"
