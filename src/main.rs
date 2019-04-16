@@ -1,30 +1,21 @@
 #![cfg_attr(feature = "nightly", feature(split_ascii_whitespace))]
 
-use self::pid_summary::PidSummary;
-use self::session_summary::SessionSummary;
-use self::sort_by::SortBy;
 use clap::{App, Arg, ArgGroup, ArgMatches};
-use fxhash::FxBuildHasher;
 use memmap::MmapOptions;
 use std::error::Error;
 use std::fs::File;
 use std::str;
+use strace_parse::histogram;
+use strace_parse::real_time;
+use strace_parse::session_summary::SessionSummary;
+use strace_parse::sort_by::SortBy;
+use strace_parse::syscall_data;
+use strace_parse::syscall_stats;
+use strace_parse::HashSet;
+use strace_parse::Pid;
+use strace_parse::PidPrintAmt;
 
 pub mod check_flags;
-pub mod file_data;
-pub mod histogram;
-pub mod io;
-pub mod parser;
-pub mod pid_summary;
-pub mod real_time;
-pub mod session_summary;
-pub mod sort_by;
-pub mod syscall_data;
-pub mod syscall_stats;
-
-type Pid = i32;
-type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
-type HashSet<T> = rayon_hash::HashSet<T, FxBuildHasher>;
 
 enum SubCmd {
     Pid,
@@ -39,12 +30,6 @@ pub enum PrintMode {
     Io,
     Exec,
     Open,
-}
-
-pub enum PidPrintAmt {
-    All,
-    Listed,
-    Related,
 }
 
 fn validate_pid(p: String) -> Result<(), String> {

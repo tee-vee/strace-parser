@@ -1,7 +1,7 @@
+use crate::real_time;
+use crate::Pid;
 use chrono::NaiveTime;
 use std::io::{prelude::*, stdout, Error};
-use strace_parse::real_time;
-use strace_parse::Pid;
 
 pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
     let mut tokens = line.split_whitespace();
