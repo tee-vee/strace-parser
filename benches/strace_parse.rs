@@ -5,9 +5,6 @@ use rayon::prelude::*;
 use strace_parse::parser::parse_line;
 use strace_parse::syscall_data::build_syscall_data;
 
-#[path = "../src/main.rs"]
-mod strace_parser;
-
 fn build_strace_data(buffer: &str) {
     let _syscall_data = build_syscall_data(buffer);
 }
