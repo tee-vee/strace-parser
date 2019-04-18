@@ -57,7 +57,7 @@ impl<'a> fmt::Display for FileData<'a> {
 }
 
 pub enum SortFilesBy {
-    Length,
+    Duration,
     Time,
 }
 
@@ -74,7 +74,7 @@ pub fn files_opened<'a>(
             let mut coalesced_data: Vec<_> = coalesce_file_data(open_events.as_slice());
 
             match sort_by {
-                SortFilesBy::Length => coalesced_data.par_sort_by(|x, y| {
+                SortFilesBy::Duration => coalesced_data.par_sort_by(|x, y| {
                     (&y.duration)
                         .partial_cmp(&x.duration)
                         .expect("Invalid comparison when sorting file open times")
