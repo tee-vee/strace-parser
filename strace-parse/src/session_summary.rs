@@ -1,8 +1,8 @@
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{file_data, file_data::SortFilesBy, io};
-use crate::{HashMap, Pid, PidPrintAmt, PidSummary, SortBy};
+use crate::{file_data, file_data::SortFilesBy, io_data};
+use crate::{HashMap, Pid, PidSummary, SortBy, SortEventsBy};
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -231,7 +231,7 @@ impl<'a> SessionSummary<'a> {
         Ok(())
     }
 
-    pub fn print_pid_stats(&self, mut count: usize, sort_by: SortBy) -> Result<(), Error> {
+    pub fn print_pid_list(&self, mut count: usize, sort_by: SortBy) -> Result<(), Error> {
         if count > self.pid_summaries.len() {
             count = self.pid_summaries.len()
         }
@@ -266,7 +266,7 @@ impl<'a> SessionSummary<'a> {
         pids: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
     ) -> Result<(), Error> {
-        let file_times = file_data::files_opened(&pids, raw_data, SortFilesBy::Length);
+        let file_times = file_data::files_opened(&pids, raw_data, SortFilesBy::Duration);
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
@@ -307,11 +307,7 @@ impl<'a> SessionSummary<'a> {
         Ok(())
     }
 
-    pub fn print_exec_list(
-        &self,
-        pids_to_print: &[Pid],
-        print_type: PidPrintAmt,
-    ) -> Result<(), Error> {
+    pub fn print_exec_list(&self, pids_to_print: &[Pid]) -> Result<(), Error> {
         writeln!(stdout(), "\nPrograms Executed\n")?;
         writeln!(
             stdout(),
@@ -325,17 +321,7 @@ impl<'a> SessionSummary<'a> {
             "  -------              ---------               ------"
         )?;
 
-        let pids = match print_type {
-            PidPrintAmt::All => self
-                .to_sorted(SortBy::Pid)
-                .iter()
-                .filter(|(_, summary)| summary.execve.is_some())
-                .map(|(pid, _)| *pid)
-                .collect(),
-            _ => pids_to_print.to_owned(),
-        };
-
-        for pid in pids {
+        for pid in pids_to_print.iter() {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 if let Some((cmd, args)) = pid_summary.format_execve() {
                     writeln!(stdout(), "  {: >7}    {: ^30}    {: <}", pid, cmd, args)?;
@@ -351,6 +337,7 @@ impl<'a> SessionSummary<'a> {
         &self,
         pids_to_print: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
+        sort_by: SortEventsBy,
     ) -> Result<(), Error> {
         let open_calls = file_data::files_opened(&pids_to_print, raw_data, SortFilesBy::Time);
 
@@ -375,7 +362,21 @@ impl<'a> SessionSummary<'a> {
             .flatten()
             .collect();
 
-        open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
+        match sort_by {
+            SortEventsBy::Duration => {
+                open_events.par_sort_by(|x, y| {
+                    (x.duration)
+                        .partial_cmp(&y.duration)
+                        .expect("Invalid comparison on io durations")
+                });
+            }
+            SortEventsBy::Pid => {
+                open_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
+            }
+            SortEventsBy::Time => {
+                open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
+            }
+        }
 
         for event in open_events {
             writeln!(stdout(), "  {: >7}    {}", event.pid, event,)?;
@@ -390,8 +391,9 @@ impl<'a> SessionSummary<'a> {
         &self,
         pids_to_print: &[Pid],
         raw_data: &HashMap<Pid, PidData<'a>>,
+        sort_by: SortEventsBy,
     ) -> Result<(), Error> {
-        let io_calls = io::io_calls(pids_to_print, raw_data);
+        let io_calls = io_data::io_calls(pids_to_print, raw_data);
 
         writeln!(stdout(), "\nI/O Performed")?;
         writeln!(
@@ -416,7 +418,21 @@ impl<'a> SessionSummary<'a> {
             .flatten()
             .collect();
 
-        io_events.par_sort_by(|x, y| (x.time).cmp(y.time));
+        match sort_by {
+            SortEventsBy::Duration => {
+                io_events.par_sort_by(|x, y| {
+                    (x.duration)
+                        .partial_cmp(&y.duration)
+                        .expect("Invalid comparison on io durations")
+                });
+            }
+            SortEventsBy::Pid => {
+                io_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
+            }
+            SortEventsBy::Time => {
+                io_events.par_sort_by(|x, y| (x.time).cmp(y.time));
+            }
+        }
 
         for event in io_events {
             writeln!(stdout(), "{}", event)?;

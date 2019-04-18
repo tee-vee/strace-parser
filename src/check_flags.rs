@@ -1,6 +1,6 @@
 use chrono::NaiveTime;
 use std::io::{prelude::*, stdout, Error};
-use strace_parse::real_time;
+use strace_parse::time;
 use strace_parse::Pid;
 
 pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
@@ -23,7 +23,7 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
         if NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f").is_ok() && time_str.contains('.') {
             true
         } else if time_str.chars().next().filter(|c| *c != '0').is_some()
-            && real_time::parse_unix_timestamp(time_str).is_some()
+            && time::parse_unix_timestamp(time_str).is_some()
         {
             true
         } else {

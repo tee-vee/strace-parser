@@ -1,156 +1,35 @@
 #![cfg_attr(feature = "nightly", feature(split_ascii_whitespace))]
 
-use clap::{App, Arg, ArgGroup, ArgMatches};
+use clap::ArgMatches;
 use memmap::MmapOptions;
 use std::error::Error;
 use std::fs::File;
 use std::str;
 use strace_parse::histogram;
-use strace_parse::real_time;
 use strace_parse::session_summary::SessionSummary;
-use strace_parse::sort_by::SortBy;
+use strace_parse::sort_by::{SortBy, SortEventsBy};
 use strace_parse::syscall_data;
 use strace_parse::syscall_stats;
+use strace_parse::time;
 use strace_parse::HashSet;
 use strace_parse::Pid;
-use strace_parse::PidPrintAmt;
 
-pub mod check_flags;
+mod check_flags;
+mod cli;
 
+#[derive(Clone, Copy, Debug)]
 enum SubCmd {
-    Pid,
-    Summary,
-}
-
-pub enum PrintMode {
-    Summary,
-    Stats,
-    Pid,
-    Histogram(String),
-    Io,
+    Details,
     Exec,
-    Open,
-}
-
-fn validate_pid(p: String) -> Result<(), String> {
-    if p.parse::<Pid>().is_ok() {
-        return Ok(());
-    }
-    Err(String::from("PID must be an integer"))
-}
-
-fn validate_count(c: String) -> Result<(), String> {
-    if c.parse::<usize>().is_ok() {
-        return Ok(());
-    }
-    Err(String::from("COUNT must be a non-negative integer"))
+    Files,
+    Io,
+    Histogram,
+    List,
+    Summary,
 }
 
 fn main() {
-    let app_matches = App::new("strace parser")
-        .version("0.4.0")
-        .author("Will Chandler <wchandler@gitlab.com>")
-        .about("Summarizes raw strace output")
-        .arg(
-            Arg::with_name("INPUT")
-                .help("File to be parsed")
-                .required(true)
-                .takes_value(true)
-                .number_of_values(1),
-        )
-        .arg(
-            Arg::with_name("count")
-                .short("c")
-                .long("count")
-                .help("The number of PIDs to print")
-                .takes_value(true)
-                .value_name("COUNT")
-                .default_value_if("detail", None, "5")
-                .validator(validate_count),
-        )
-        .arg(
-            Arg::with_name("details")
-                .short("d")
-                .long("details")
-                .help("Prints detailed stats for syscalls made by top <COUNT> PIDs"),
-        )
-        .arg(
-            Arg::with_name("exec")
-                .short("e")
-                .long("exec")
-                .help("List programs executed via 'execve'"),
-        )
-        .arg(
-            Arg::with_name("files")
-                .short("f")
-                .long("files")
-                .help("List files opened via 'open' and 'openat'"),
-        )
-        .arg(
-            Arg::with_name("histogram")
-                .short("h")
-                .long("histogram")
-                .help("Prints a log\u{2082} scale histogram of the execution times for <SYSCALL>")
-                .takes_value(true)
-                .number_of_values(1)
-                .value_name("SYSCALL"),
-        )
-        .arg(
-            Arg::with_name("io")
-                .short("i")
-                .long("io")
-                .help("List read/writes from 'read', 'recvmsg', 'sendmsg', and 'write'"),
-        )
-        .arg(
-            Arg::with_name("pid")
-                .short("p")
-                .long("pid")
-                .help("Print details of one or more PIDs")
-                .takes_value(true)
-                .value_name("PIDS")
-                .multiple(true)
-                .validator(validate_pid),
-        )
-        .arg(
-            Arg::with_name("related")
-                .short("r")
-                .long("related")
-                .help("Include details of parent and child PIDs of <PIDS> in results"),
-        )
-        .arg(
-            Arg::with_name("sort_by")
-                .short("s")
-                .long("sort")
-                .help("Field to sort results by")
-                .takes_value(true)
-                .value_name("SORT_BY")
-                .possible_values(&[
-                    "active_time",
-                    "children",
-                    "pid",
-                    "syscalls",
-                    "total_time",
-                    "user_time",
-                ]),
-        )
-        .group(
-            ArgGroup::with_name("summary_group")
-                .args(&["count", "details", "sort_by"])
-                .multiple(true)
-                .conflicts_with_all(&["list_group", "pid_group"]),
-        )
-        .group(
-            ArgGroup::with_name("list_group")
-                .args(&["exec", "files", "io", "histogram"])
-                .conflicts_with("summary_group"),
-        )
-        .group(
-            ArgGroup::with_name("pid_group")
-                .args(&["pid", "related"])
-                .multiple(true)
-                .conflicts_with("summary_group"),
-        )
-        .get_matches();
+    let app_matches = cli::cli_args();
 
     match execute(app_matches) {
         Err(e) => {
@@ -161,44 +40,8 @@ fn main() {
     };
 }
 
+
 fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
-    let sub_cmd = if app_matches.is_present("pid") {
-        SubCmd::Pid
-    } else {
-        SubCmd::Summary
-    };
-
-    let print_mode = match sub_cmd {
-        SubCmd::Pid => {
-            if app_matches.is_present("exec") {
-                PrintMode::Exec
-            } else if app_matches.is_present("files") {
-                PrintMode::Open
-            } else if let Some(hist) = app_matches.value_of("histogram") {
-                PrintMode::Histogram(hist.to_string())
-            } else if app_matches.is_present("io") {
-                PrintMode::Io
-            } else {
-                PrintMode::Pid
-            }
-        }
-        SubCmd::Summary => {
-            if app_matches.is_present("details") {
-                PrintMode::Stats
-            } else if app_matches.is_present("exec") {
-                PrintMode::Exec
-            } else if app_matches.is_present("files") {
-                PrintMode::Open
-            } else if let Some(hist) = app_matches.value_of("histogram") {
-                PrintMode::Histogram(hist.to_string())
-            } else if app_matches.is_present("io") {
-                PrintMode::Io
-            } else {
-                PrintMode::Summary
-            }
-        }
-    };
-
     let file_name = app_matches.value_of("INPUT").ok_or("Missing filename")?;
     let file = File::open(file_name)?;
     let mmap = unsafe { MmapOptions::new().map(&file) }?;
@@ -215,81 +58,113 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
     }
 
     let syscall_data = syscall_data::build_syscall_data(&buffer);
-
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
-
     let session_summary = SessionSummary::from_syscall_stats(&syscall_stats, &syscall_data);
+    let elapsed_time = time::parse_elapsed_real_time(&buffer);
 
-    let elapsed_time = real_time::parse_elapsed_real_time(&buffer);
+    let (subcmd, args) = parse_subcmd(&app_matches);
 
-    match sub_cmd {
-        SubCmd::Pid => {
-            let pid_strs: HashSet<_> = app_matches
-                .values_of("pid")
-                .ok_or("No pids entered")?
-                .collect();
-
-            let pids: Vec<_> = pid_strs
-                .into_iter()
-                .filter_map(|p| p.parse::<Pid>().ok())
-                .collect();
-
-            let checked_pids = session_summary.validate_pids(&pids)?;
-
-            let (pids_to_print, print_type) = if app_matches.is_present("related") {
-                let related_pids = session_summary.related_pids(&checked_pids);
-                (related_pids, PidPrintAmt::Related)
-            } else {
-                (checked_pids, PidPrintAmt::Listed)
-            };
-
-            // ignore result as we expect failures when piping to head
-            let _result = match print_mode {
-                PrintMode::Exec => session_summary.print_exec_list(&pids_to_print, print_type),
-                PrintMode::Open => {
-                    session_summary.print_opened_files(&pids_to_print, &syscall_data)
-                }
-                PrintMode::Histogram(syscall) => {
-                    histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
-                }
-                PrintMode::Io => session_summary.print_io(&pids_to_print, &syscall_data),
-                _ => session_summary.print_pid_details(&pids_to_print, &syscall_data),
-            };
+    // ignore result as we expect failures when piping to head
+    let _result = match subcmd {
+        SubCmd::Details => {
+            let pids_to_print = select_pids(args, &session_summary)?;
+            session_summary.print_pid_details(&pids_to_print, &syscall_data)
         }
-        SubCmd::Summary => {
-            let sort_by = match app_matches.value_of("sort_by") {
-                Some("active_time") => SortBy::ActiveTime,
-                Some("children") => SortBy::ChildPids,
-                Some("pid") => SortBy::Pid,
-                Some("syscalls") => SortBy::SyscallCount,
-                Some("total_time") => SortBy::TotalTime,
-                Some("user_time") => SortBy::UserTime,
-                _ => SortBy::ActiveTime,
-            };
-
-            let count_to_print = if let Some(count) = app_matches.value_of("count") {
+        SubCmd::Io => {
+            let pids_to_print = select_pids(&args, &session_summary)?;
+            let sort_by = args
+                .value_of("sort_by")
+                .unwrap_or_default()
+                .parse::<SortEventsBy>()
+                .unwrap_or_default();
+            session_summary.print_io(&pids_to_print, &syscall_data, sort_by)
+        }
+        SubCmd::Files => {
+            let pids_to_print = select_pids(&args, &session_summary)?;
+            let sort_by = args
+                .value_of("sort_by")
+                .unwrap_or_default()
+                .parse::<SortEventsBy>()
+                .unwrap_or_default();
+            session_summary.print_opened_files(&pids_to_print, &syscall_data, sort_by)
+        }
+        SubCmd::Exec => {
+            let pids_to_print = select_pids(&args, &session_summary)?;
+            session_summary.print_exec_list(&pids_to_print)
+        }
+        SubCmd::Histogram => {
+            let pids_to_print = select_pids(&args, &session_summary)?;
+            let syscall = args.value_of("syscall").unwrap_or_default();
+            histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
+        }
+        SubCmd::List => {
+            let count_to_print = if let Some(count) = args.value_of("count") {
                 count.parse::<usize>()?
             } else {
                 25
             };
 
-            // ignore result as we expect failures when piping to head
-            let _result = match print_mode {
-                PrintMode::Stats => session_summary.print_pid_stats(count_to_print, sort_by),
-                PrintMode::Exec => {
-                    session_summary.print_exec_list(&session_summary.pids(), PidPrintAmt::All)
-                }
-                PrintMode::Open => {
-                    session_summary.print_opened_files(&session_summary.pids(), &syscall_data)
-                }
-                PrintMode::Histogram(syscall) => {
-                    histogram::print_histogram(&syscall, &session_summary.pids(), &syscall_data)
-                }
-                PrintMode::Io => session_summary.print_io(&session_summary.pids(), &syscall_data),
-                _ => session_summary.print_summary(elapsed_time, count_to_print, sort_by),
-            };
+            let sort_by = args
+                .value_of("sort_by")
+                .unwrap_or_default()
+                .parse::<SortBy>()
+                .unwrap_or_default();
+            session_summary.print_pid_list(count_to_print, sort_by)
         }
-    }
+        SubCmd::Summary => {
+            let count_to_print = if let Some(count) = args.value_of("count") {
+                count.parse::<usize>()?
+            } else {
+                25
+            };
+
+            let sort_by = args
+                .value_of("sort_by")
+                .unwrap_or_default()
+                .parse::<SortBy>()
+                .unwrap_or_default();
+            session_summary.print_summary(elapsed_time, count_to_print, sort_by)
+        }
+    };
 
     Ok(())
+
+}
+
+fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<'a>) {
+    match app_matches.subcommand() {
+        ("details", Some(args)) => (SubCmd::Details, args),
+        ("exec", Some(args)) => (SubCmd::Exec, args),
+        ("files", Some(args)) => (SubCmd::Files, args),
+        ("io", Some(args)) => (SubCmd::Io, args),
+        ("histogram", Some(args)) => (SubCmd::Histogram, args),
+        ("list", Some(args)) => (SubCmd::List, args),
+        ("summary", Some(args)) => (SubCmd::Summary, args),
+        _ => unreachable!(),
+    }
+}
+
+fn select_pids(
+    args: &ArgMatches,
+    session_summary: &SessionSummary,
+) -> Result<Vec<Pid>, Box<dyn Error>> {
+    if args.value_of("pid").is_some() {
+        let pid_strs: HashSet<_> = args.values_of("pid").ok_or("No pids entered")?.collect();
+
+        let pids: Vec<_> = pid_strs
+            .into_iter()
+            .filter_map(|p| p.parse::<Pid>().ok())
+            .collect();
+
+        let checked_pids = session_summary.validate_pids(&pids)?;
+
+        if args.is_present("related") {
+            let related_pids = session_summary.related_pids(&checked_pids);
+            Ok(related_pids)
+        } else {
+            Ok(checked_pids)
+        }
+    } else {
+        Ok(session_summary.pids())
+    }
 }
