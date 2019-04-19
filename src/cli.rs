@@ -17,14 +17,13 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                 .takes_value(true)
                 .number_of_values(1),
         )
-        .subcommand(SubCommand::with_name("details")
-            .about("Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls")
+        .subcommand(SubCommand::with_name("exec")
+            .about("List programs executed")
             .arg(
                 Arg::with_name("pid")
                     .short("p")
                     .long("pid")
-                    .help("PIDs to analyze")
-                    .required(true)
+                    .help("PID(s) to analyze")
                     .takes_value(true)
                     .value_name("PIDS")
                     .multiple(true)
@@ -34,23 +33,8 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                 Arg::with_name("related")
                     .short("r")
                     .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
-            ))
-        .subcommand(SubCommand::with_name("exec")
-            .about("List programs executed")
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .help("PIDS to analyze")
-                    .takes_value(true)
-                    .value_name("PIDS")
-                    .multiple(true)
-            )
-            .arg( Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("files")
             .about("List files opened")
@@ -58,7 +42,7 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                 Arg::with_name("pid")
                     .short("p")
                     .long("pid")
-                    .help("PIDs to analyze")
+                    .help("PID(s) to analyze")
                     .takes_value(true)
                     .value_name("PIDS")
                     .multiple(true)
@@ -67,7 +51,8 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
             .arg( Arg::with_name("related")
                     .short("r")
                     .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
             )
             .arg(
                 Arg::with_name("sort_by")
@@ -83,11 +68,9 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                     ]),
             ))
         .subcommand(SubCommand::with_name("histogram")
-            .about("List files opened")
+            .about("Prints a log\u{2082} scale histogram of the execution times in \u{03BC}secs for <SYSCALL>")
             .arg(
                 Arg::with_name("syscall")
-                    .short("S")
-                    .long("syscall")
                     .help("Syscall to analyze")
                     .required(true)
                     .value_name("SYSCALL")
@@ -98,7 +81,7 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                 Arg::with_name("pid")
                     .short("p")
                     .long("pid")
-                    .help("PIDs to analyze")
+                    .help("PID(s) to analyze")
                     .takes_value(true)
                     .value_name("PIDS")
                     .multiple(true)
@@ -108,15 +91,16 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                 Arg::with_name("related")
                     .short("r")
                     .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("io")
-            .about("List details of I/O syscalls, including read, write, sendmsg, recvmsg, and others")
+            .about("Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write")
             .arg(
                 Arg::with_name("pid")
                     .short("p")
                     .long("pid")
-                    .help("Comma separated list PIDs to analyze")
+                    .help("PID(s) to analyze")
                     .takes_value(true)
                     .value_name("PIDS")
                     .multiple(true)
@@ -138,10 +122,11 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
             .arg( Arg::with_name("related")
                     .short("r")
                     .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
             ))
-        .subcommand(SubCommand::with_name("list")
-            .about("List of PIDs with details of syscall performance")
+        .subcommand(SubCommand::with_name("list_pids")
+            .about("List of PIDs and their syscall stats")
             .arg(
                 Arg::with_name("count")
                     .short("c")
@@ -151,22 +136,6 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                     .value_name("COUNT")
                     .default_value_if("detail", None, "5")
                     .validator(validate_count),
-            )
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .help("Comma separated list PIDs to analyze")
-                    .takes_value(true)
-                    .value_name("PIDS")
-                    .multiple(true)
-                    .validator(validate_pid),
-            )
-            .arg(
-                Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
             )
             .arg(
                 Arg::with_name("sort_by")
@@ -184,6 +153,24 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                         "user_time",
                     ]),
             ))
+        .subcommand(SubCommand::with_name("pid")
+            .about("Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls")
+            .arg(
+                Arg::with_name("pid")
+                    .help("PID(s) to analyze")
+                    .required(true)
+                    .takes_value(true)
+                    .value_name("PIDS")
+                    .multiple(true)
+                    .validator(validate_pid),
+            )
+            .arg(
+                Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
+            ))
         .subcommand(SubCommand::with_name("summary")
             .about("Overview of PIDs in session")
             .arg(
@@ -195,22 +182,6 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                     .value_name("COUNT")
                     .default_value_if("detail", None, "5")
                     .validator(validate_count),
-            )
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .help("Comma separated list PIDs to analyze")
-                    .takes_value(true)
-                    .value_name("PIDS")
-                    .multiple(true)
-                    .validator(validate_pid),
-            )
-            .arg(
-                Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results"),
             )
             .arg(
                 Arg::with_name("sort_by")

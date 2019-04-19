@@ -133,12 +133,12 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
 
 fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<'a>) {
     match app_matches.subcommand() {
-        ("details", Some(args)) => (SubCmd::Details, args),
+        ("pid", Some(args)) => (SubCmd::Details, args),
         ("exec", Some(args)) => (SubCmd::Exec, args),
         ("files", Some(args)) => (SubCmd::Files, args),
         ("io", Some(args)) => (SubCmd::Io, args),
         ("histogram", Some(args)) => (SubCmd::Histogram, args),
-        ("list", Some(args)) => (SubCmd::List, args),
+        ("list_pids", Some(args)) => (SubCmd::List, args),
         ("summary", Some(args)) => (SubCmd::Summary, args),
         _ => unreachable!(),
     }
