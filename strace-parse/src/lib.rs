@@ -18,9 +18,3 @@ pub mod time;
 pub type Pid = i32;
 pub type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
 pub type HashSet<T> = rayon_hash::HashSet<T, FxBuildHasher>;
-
-pub enum PidPrintAmt {
-    All,
-    Listed,
-    Related,
-}
