@@ -5,7 +5,7 @@ pub fn parse_elapsed_real_time(buffer: &str) -> Option<Duration> {
         .lines()
         .next()
         .map(|line| line.split_whitespace())
-        .and_then(|split| split.nth(1);
+        .and_then(|split| split.nth(1));
 
     let end_token = buffer
         .lines()
