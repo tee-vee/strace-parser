@@ -5,13 +5,13 @@ pub fn parse_elapsed_real_time(buffer: &str) -> Option<Duration> {
         .lines()
         .next()
         .map(|line| line.split_whitespace())
-        .and_then(|split| split.nth(1));
+        .and_then(|mut split| split.nth(1));
 
     let end_token = buffer
         .lines()
         .next_back()
         .map(|line| line.split_whitespace())
-        .and_then(|split| split.nth(1));
+        .and_then(|mut split| split.nth(1));
 
     match (start_token, end_token) {
         (Some(start), Some(end)) => {
