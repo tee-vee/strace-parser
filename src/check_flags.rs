@@ -8,6 +8,14 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
 
     let pid = tokens.next().and_then(|p| p.parse::<Pid>().ok()).is_some();
 
+//            syscall = tokens.next().filter(|syscall_tok| {
+//                syscall_tok
+//                    .chars()
+//                    .next()
+//                    .filter(char::is_ascii_alphabetic)
+//                    .is_some()
+//            })?;
+
     let time_str = tokens
         .next()
         .filter(|time_token| {
@@ -19,26 +27,20 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
         })
         .unwrap_or_default();
 
-    let time =
-        if NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f").is_ok() && time_str.contains('.') {
-            true
-        } else if time_str.chars().next().filter(|c| *c != '0').is_some()
-            && time::parse_unix_timestamp(time_str).is_some()
-        {
-            true
-        } else {
-            false
-        };
+    let iso_time_ok =
+        NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f").is_ok() && time_str.contains('.');
+    let unix_time_ok = time_str.chars().next().filter(|c| *c != '0').is_some() && time::parse_unix_timestamp(time_str).is_some();
+    let time = iso_time_ok || unix_time_ok;
 
-    let execution = tokens.next_back().filter(|s| s.ends_with('>')).is_some();
+    let duration = tokens.next_back().filter(|s| s.ends_with('>')).is_some();
 
-    if pid && time && execution {
+    if pid && time && duration {
         Ok(true)
     } else {
         write!(
             stdout(),
             "  Error: strace command must include '-f', '-T' and '-tt' OR '-ttt'\
-             \n    '-yyy' is also recommended to obtain all file names in '--io / -i'\
+             \n    '-yyy' is also recommended to obtain all file names in 'io'\
              \n\n  The following required flag(s) were missing when strace was run: "
         )?;
 
@@ -50,7 +52,7 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
             write!(stdout(), "[-tt OR -ttt] ")?;
         }
 
-        if !execution {
+        if !duration {
             write!(stdout(), "-T ")?;
         }
 

@@ -106,12 +106,9 @@ where
                 }
                 "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
                 | "write" => {
-                    file = syscall_split.next().and_then(|s| {
-                        s.splitn(2, '<')
-                            .skip(1)
-                            .next()
-                            .and_then(|s| s.get(0..s.len() - 2))
-                    });
+                    file = syscall_split
+                        .next()
+                        .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(0..s.len() - 2)));
                 }
                 _ => {}
             }

@@ -48,10 +48,10 @@ pub fn parse_unix_timestamp(time: &str) -> Option<NaiveDateTime> {
         Some(s) => s,
         None => return None,
     };
-    let nsecs = match split_iter.next().and_then(|n| n.parse::<u32>().ok()) {
+    let nanosecs = match split_iter.next().and_then(|n| n.parse::<u32>().ok()) {
         Some(n) => n * 1000, // strace provides usecs, convert to nsecs
         None => return None,
     };
 
-    NaiveDateTime::from_timestamp_opt(secs, nsecs)
+    NaiveDateTime::from_timestamp_opt(secs, nanosecs)
 }

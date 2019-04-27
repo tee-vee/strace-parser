@@ -12,12 +12,6 @@ pub enum SortBy {
     UserTime,
 }
 
-impl Default for SortBy {
-    fn default() -> SortBy {
-        SortBy::ActiveTime
-    }
-}
-
 impl fmt::Display for SortBy {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -52,11 +46,6 @@ pub enum SortEventsBy {
     Duration,
     Pid,
     Time,
-}
-impl Default for SortEventsBy {
-    fn default() -> SortEventsBy {
-        SortEventsBy::Time
-    }
 }
 
 impl fmt::Display for SortEventsBy {

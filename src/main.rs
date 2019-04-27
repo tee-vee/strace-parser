@@ -31,13 +31,10 @@ enum SubCmd {
 fn main() {
     let app_matches = cli::cli_args();
 
-    match execute(app_matches) {
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-        _ => {}
-    };
+    if let Err(e) = execute(app_matches) {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
 }
 
 
@@ -76,7 +73,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .value_of("sort_by")
                 .unwrap_or_default()
                 .parse::<SortEventsBy>()
-                .unwrap_or_default();
+                .unwrap_or(SortEventsBy::Time);
             session_summary.print_io(&pids_to_print, &syscall_data, sort_by)
         }
         SubCmd::Files => {
@@ -85,7 +82,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .value_of("sort_by")
                 .unwrap_or_default()
                 .parse::<SortEventsBy>()
-                .unwrap_or_default();
+                .unwrap_or(SortEventsBy::Time);
             session_summary.print_opened_files(&pids_to_print, &syscall_data, sort_by)
         }
         SubCmd::Exec => {
@@ -108,7 +105,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .value_of("sort_by")
                 .unwrap_or_default()
                 .parse::<SortBy>()
-                .unwrap_or_default();
+                .unwrap_or(SortBy::ActiveTime);
             session_summary.print_pid_list(count_to_print, sort_by)
         }
         SubCmd::Summary => {
@@ -122,7 +119,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .value_of("sort_by")
                 .unwrap_or_default()
                 .parse::<SortBy>()
-                .unwrap_or_default();
+                .unwrap_or(SortBy::ActiveTime);
             session_summary.print_summary(elapsed_time, count_to_print, sort_by)
         }
     };

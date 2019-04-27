@@ -95,7 +95,8 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
         let start_time = pid_data.start_time;
         let end_time = pid_data.end_time;
 
-        let total_time = PidSummary::calc_total_time(start_time, end_time);
+        let total_time =
+            PidSummary::calc_total_time(start_time, end_time, system_active_time, system_wait_time);
 
         let user_time = total_time - system_active_time - system_wait_time;
 
@@ -126,7 +127,7 @@ impl<'a> PidSummary<'a> {
 
             let mut args = args_iter
                 .skip(1)
-                .map(|a| a.trim_end_matches(","))
+                .map(|a| a.trim_end_matches(','))
                 .fold(String::new(), |s, arg| s + arg + " ");
 
             if execve.iter().any(|s| s.ends_with("],")) && args.len() > 1 {
@@ -190,17 +191,25 @@ impl<'a> PidSummary<'a> {
         Ok(())
     }
 
-    fn calc_total_time(start: &str, end: &str) -> f32 {
+    fn calc_total_time(start: &str, end: &str, active_time: f32, wait_time: f32) -> f32 {
         let st = NaiveTime::parse_from_str(start, "%H:%M:%S%.6f");
         let et = NaiveTime::parse_from_str(end, "%H:%M:%S%.6f");
 
-        if let (Some(s), Some(e)) = (st.ok(), et.ok()) {
+        let timestamp_time = if let (Some(s), Some(e)) = (st.ok(), et.ok()) {
             (e - s).num_microseconds().unwrap() as f32 / 1000.0
         } else if let (Some(s), Some(e)) = (parse_unix_timestamp(start), parse_unix_timestamp(end))
         {
             (e - s).num_microseconds().unwrap() as f32 / 1000.0
         } else {
             0.0
+        };
+
+        // In some cases a syscall begun before strace may report
+        // a run time greater than the timestamp span of the trace
+        if timestamp_time > active_time + wait_time {
+            timestamp_time
+        } else {
+            active_time + wait_time
         }
     }
 }
