@@ -16,29 +16,29 @@ It can generate the following metrics:
 **NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
 to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
-### Building
+## Building
 
 You'll need the Rust compiler, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
 On the stable compiler build with `cargo build --release`.  On nightly you can use `cargo build --release --features nightly` for a ~10% performance boost.
 
-### Usage
+## Usage
 
 `strace-parser <INPUT> <SUBCOMMAND> [FLAGS] [OPTIONS]`
 
 **Args**:
    * `<INPUT>` - strace output file to analyze
 
-Subcommands:
+**Subcommands**:
 
-  * exec - List programs executed
-  * files - List files opened
-  * help - Print a brief help message
-  * quantize - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
-  * io - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
-  * list_pids - List of PIDs and their syscall stats
-  * pid - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
-  * summary - Overview of PIDs in session
+  * `exec` - List programs executed
+  * `files` - List files opened
+  * `help` - Print a brief help message
+  * `io` - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
+  * `list_pids` - List of PIDs and their syscall stats
+  * `pid` - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
+* `quantize` - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
+  * `summary` - Overview of PIDs in session
 
 Note that all subcommands can be arbritrarily abbreviated.
 
@@ -46,9 +46,9 @@ For example, `strace-parser trace.txt s` goes to summary, while `strace-parser t
 
 ---
 
-#### Subcommand Details
+### Subcommand Details
 
-##### summary
+#### summary
 
 By default results are sorted by time the process was active, can be changed with `-s, --sort`
 
@@ -58,12 +58,12 @@ By default results are sorted by time the process was active, can be changed wit
 
    * `-c, --count <COUNT>` - The number of PIDs to print, defaults to 25
    * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to active time. Options:
-       * active_time
-       * children
-       * pid 
-       * syscalls
-       * total_time
-       * user_time
+       * `active_time`
+       * `children`
+       * `pid` 
+       * `syscalls`
+       * `total_time`
+       * `user_time`
 
 ```
 $ strace-parser trace.txt summary --count 2
@@ -83,7 +83,50 @@ sys    12m17.512s
 ```
 ---
 
-##### pid
+#### list_pids
+
+Print a list of the syscall stats of the top PIDs.
+
+`strace-parser <INPUT> summary [OPTIONS]`
+
+**Options**:
+
+   * `-c, --count <COUNT>` - The number of PIDs to print, defaults to 25
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to active time. Options:
+       * `active_time`
+       * `children`
+       * `pid` 
+       * `syscalls`
+       * `total_time`
+       * `user_time`
+
+```
+$ strace-parser trace.txt list_pids --count 2 --sort syscalls
+Details of Top 2 PIDs by Syscall Count
+-----------
+
+PID 18741
+4098 syscalls, active time: 374.363ms, total time: 10487.062ms
+
+  syscall        	   count	total (ms)	  max (ms)	  avg (ms)	  min (ms)	errors
+  ---------------	--------	----------	----------	----------	----------	--------
+  select         	      42	  9893.016	  4806.976	   235.548	     0.012
+  clock_gettime  	    2550	   208.378	     3.959	     0.082	     0.008
+  futex          	      79	   206.069	   101.633	     2.608	     0.009	EAGAIN: 3   ETIMEDOUT: 5
+
+PID 17021
+1473 syscalls, active time: 67.277ms, total time: 11199.049ms
+
+  syscall        	   count	total (ms)	  max (ms)	  avg (ms)	  min (ms)	errors
+  ---------------	--------	----------	----------	----------	----------	--------
+  select         	      42	 11115.210	  4814.914	   264.648	     0.013
+  clock_gettime  	     860	    20.842	     2.273	     0.024	     0.009
+  fcntl          	     121	    13.360	     7.037	     0.110	     0.011
+```
+
+---
+
+#### pid
 
 Details of PID(s) including syscalls stats, processes executed, and slowest `open` and `openat` calls
 
@@ -119,50 +162,7 @@ PID 16747
 
 ---
 
-##### list_pids
-
-Print a list of the syscall stats of the top PIDs.
-
-`strace-parser <INPUT> summary [OPTIONS]`
-
-**Options**:
-
-   * `-c, --count <COUNT>` - The number of PIDs to print, defaults to 25
-   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to active time. Options:
-       * active_time
-       * children
-       * pid 
-       * syscalls
-       * total_time
-       * user_time
-
-```
-$ strace-parser trace.txt list_pids --count 2 --sort syscalls
-Details of Top 2 PIDs by Syscall Count
------------
-
-PID 18741
-4098 syscalls, active time: 374.363ms, total time: 10487.062ms
-
-  syscall        	   count	total (ms)	  max (ms)	  avg (ms)	  min (ms)	errors
-  ---------------	--------	----------	----------	----------	----------	--------
-  select         	      42	  9893.016	  4806.976	   235.548	     0.012
-  clock_gettime  	    2550	   208.378	     3.959	     0.082	     0.008
-  futex          	      79	   206.069	   101.633	     2.608	     0.009	EAGAIN: 3   ETIMEDOUT: 5
-
-PID 17021
-1473 syscalls, active time: 67.277ms, total time: 11199.049ms
-
-  syscall        	   count	total (ms)	  max (ms)	  avg (ms)	  min (ms)	errors
-  ---------------	--------	----------	----------	----------	----------	--------
-  select         	      42	 11115.210	  4814.914	   264.648	     0.013
-  clock_gettime  	     860	    20.842	     2.273	     0.024	     0.009
-  fcntl          	     121	    13.360	     7.037	     0.110	     0.011
-```
-
----
-
-##### exec
+#### exec
 
 Print a list of all programs executed in session via `execve`
 
@@ -187,7 +187,7 @@ Programs Executed
 
 ---
 
-##### files
+#### files
 
 Print a list of all files opened in session via `open` and `openat`
 
@@ -196,9 +196,9 @@ Print a list of all files opened in session via `open` and `openat`
 **Options**:
    * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
    * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
-      * duration
-      * pid
-      * time
+      * `duration`
+      * `pid`
+      * `time`
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
@@ -215,7 +215,7 @@ Files Opened
 
 ---
 
-##### io
+#### io
 
 Print details of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `sendto`, and `sendmsg` calls in session
 
@@ -224,9 +224,9 @@ Print details of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `se
 **Options**:
    * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
    * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
-      * duration
-      * pid
-      * time
+      * `duration`
+      * `pid`
+      * `time`
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
@@ -244,7 +244,7 @@ I/O Performed
 
 ---
 
-##### quantize
+#### quantize
 
 Prints a log₂ scale histogram of the quantized execution times in μsecs for a given syscall.
 
@@ -292,6 +292,8 @@ That said, it is very useful for understanding what calls are made and their _re
 #### Example 1
 
 ```
+$ strace-parser trace1.txt pid 97266
+
 PID 97266
 303 syscalls, active time: 112.503ms, total time: 112.503ms
 
@@ -349,6 +351,8 @@ PID 97266
 #### Example 2
 
 ```
+$ strace-parser trace2.txt pid 64205
+
 PID 64205
 243 syscalls, active time: 120.542ms, total time: 120.542ms
 
