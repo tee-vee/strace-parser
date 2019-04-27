@@ -4,7 +4,7 @@ use crate::HashMap;
 use crate::Pid;
 use rayon::prelude::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
     pub errors: HashMap<&'a str, Pid>,
@@ -19,7 +19,7 @@ impl<'a> SyscallData<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub start_time: &'a str,
