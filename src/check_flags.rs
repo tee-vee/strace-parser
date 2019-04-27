@@ -8,14 +8,6 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
 
     let pid = tokens.next().and_then(|p| p.parse::<Pid>().ok()).is_some();
 
-//            syscall = tokens.next().filter(|syscall_tok| {
-//                syscall_tok
-//                    .chars()
-//                    .next()
-//                    .filter(char::is_ascii_alphabetic)
-//                    .is_some()
-//            })?;
-
     let time_str = tokens
         .next()
         .filter(|time_token| {
