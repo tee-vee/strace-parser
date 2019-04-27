@@ -1,4 +1,4 @@
-**Binaries can be downloaded via [Repository -> Tags](https://gitlab.com/wchandler/strace-parser/tags)**
+**Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/tags)**
 
 A small tool to analyze raw `strace` data.
 
@@ -11,28 +11,63 @@ It can generate the following metrics:
    * A list of all programs executed in session
    * A list of all file opened in session
    * A list of all read/write calls made in session
-   * A histogram showing the distribution of execution times for a given syscall
+   * A histogram showing the quantized distribution of execution times for a given syscall
 
 **NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
-to be captured
+to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
 ### Building
 
 You'll need the Rust compiler, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
-On stable build with `cargo build --release`.  On nightly you can use `cargo build --release --features nightly` for a ~10% performance boost.
+On the stable compiler build with `cargo build --release`.  On nightly you can use `cargo build --release --features nightly` for a ~10% performance boost.
 
-### Commands
+### Usage
 
-Usage: `strace-parser [FLAGS] [OPTIONS] <INPUT>`
+`strace-parser <INPUT> <SUBCOMMAND> [FLAGS] [OPTIONS]`
 
-When no flags/options are passed a base summary of the session is displayed
+**Args**:
+   * `<INPUT>` - strace output file to analyze
+
+Subcommands:
+
+  * exec - List programs executed
+  * files - List files opened
+  * help - Print a brief help message
+  * quantize - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
+  * io - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
+  * list_pids - List of PIDs and their syscall stats
+  * pid - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
+  * summary - Overview of PIDs in session
+
+Note that all subcommands can be arbritrarily abbreviated.
+
+For example, `strace-parser trace.txt s` goes to summary, while `strace-parser trace.txt fi` goes to files.
+
+---
+
+#### Subcommand Details
+
+##### summary
 
 By default results are sorted by time the process was active, can be changed with `-s, --sort`
 
-Output limited to the top 25 processes by default, can be changed with `-c, --count`
+`strace-parser <INPUT> summary [OPTIONS]`
+
+**Options**:
+
+   * `-c, --count <COUNT>` - The number of PIDs to print, defaults to 25
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to active time. Options:
+       * active_time
+       * children
+       * pid 
+       * syscalls
+       * total_time
+       * user_time
 
 ```
+$ strace-parser trace.txt summary --count 2
+
 Top 2 PIDs by Active Time
 -----------
 
@@ -46,17 +81,64 @@ real   1m0.609s
 user   0m36.305s
 sys    12m17.512s
 ```
+---
+
+##### pid
+
+Details of PID(s) including syscalls stats, processes executed, and slowest `open` and `openat` calls
+
+`strace-parser <INPUT> pid [FLAGS] <PIDS>...`
+
+**Args**:
+   * `<PIDS>...` - PID(s) to analyze
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+
+```
+$ strace-parser trace.txt pid 16747
+PID 16747
+408 syscalls, active time: 12.278ms, total time: 11375.831ms
+
+                 	        	     total	       max	       avg	       min
+  syscall        	   count	      (ms)	      (ms)	      (ms)	      (ms)	errors
+  ---------------	--------	----------	----------	----------	----------	--------
+  wait4          	      24	 11363.553	  1008.295	   473.481	     0.006	ECHILD: 12
+  rt_sigprocmask 	      96	     6.760	     1.932	     0.070	     0.007
+  ---------------
+
+  Child PIDs:  23493, 23498, 23530, 23538, 23539
+
+  Slowest file open times for PID 16747:
+
+   open (ms)	      timestamp	        error     	   file name
+  ----------	---------------	   ---------------	   ---------
+       0.041	11:29:54.146422	          -       	   /dev/null
+       0.030	11:29:49.112721	          -       	   /dev/null
+```
 
 ---
 
-`-d, --details`
+##### list_pids
 
-Print the details of the syscalls made by top processes
+Print a list of the syscall stats of the top PIDs.
 
-Sorted by active time by default, can be changed with `-s, --sort`
+`strace-parser <INPUT> summary [OPTIONS]`
+
+**Options**:
+
+   * `-c, --count <COUNT>` - The number of PIDs to print, defaults to 25
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to active time. Options:
+       * active_time
+       * children
+       * pid 
+       * syscalls
+       * total_time
+       * user_time
 
 ```
-Details of Top 2 PIDs by Active Time
+$ strace-parser trace.txt list_pids --count 2 --sort syscalls
+Details of Top 2 PIDs by Syscall Count
 -----------
 
 PID 18741
@@ -80,11 +162,21 @@ PID 17021
 
 ---
 
-`-e, --exec`
+##### exec
 
 Print a list of all programs executed in session via `execve`
 
+`strace-parser <INPUT> exec [FLAGS] [OPTIONS]`
+
+**Options**:
+   * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+
 ```
+$ strace-parser trace.txt exec --pid 27183 27184 --related
+
 Programs Executed
 
       pid	           program            	args
@@ -95,11 +187,24 @@ Programs Executed
 
 ---
 
-`-f, --files`
+##### files
 
 Print a list of all files opened in session via `open` and `openat`
 
+`strace-parser <INPUT> files [FLAGS] [OPTIONS]`
+
+**Options**:
+   * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
+      * duration
+      * pid
+      * time
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+
 ```
+$ strace-parser trace.txt files --pid 2913
 Files Opened
 
       pid	 open (ms)  	   timestamp   	        error     	   file name
@@ -110,9 +215,21 @@ Files Opened
 
 ---
 
-`-i, --io`
+##### io
 
-Print a list of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `sendto`, and `sendmsg` calls in session
+Print details of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `sendto`, and `sendmsg` calls in session
+
+`strace-parser <INPUT> io [FLAGS] [OPTIONS]`
+
+**Options**:
+   * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
+      * duration
+      * pid
+      * time
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
 
 ```
 I/O Performed
@@ -127,19 +244,25 @@ I/O Performed
 
 ---
 
-`-c, --count`
+##### quantize
 
-Number of processes to print on the base summary and in `-d/--details`
+Prints a log₂ scale histogram of the quantized execution times in μsecs for a given syscall.
 
----
+`strace-parser quantize [FLAGS] [OPTIONS] <SYSCALL>`
 
-`-h, --histogram <SYSCALL>`
+**Args**:
+   * `<SYSCALL>` - Syscall to analyze
 
-Print a chart of execution times for `<SYSCALL>`
+**Options**:
+   * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
 
 ```
+$ strace-parser trace.txt quantize write --pid 2993 28861 --related
   syscall: write
-  pids: 28861 27191 2993 27758 27569 28136 27947 28514 27222 27411 and 1373 more...
+  pids: 28861 27191 2993 27758 27569 28136 27947 28514 27222 27411 and 17 more...
 
     μsecs       	     count	 distribution
     ------------	  --------	 ----------------------------------------
@@ -159,62 +282,12 @@ Print a chart of execution times for `<SYSCALL>`
 
 ---
 
-`-p, --pid <PIDS>`
-
-Limit output to the PIDs specified. Can be combined with `-r, --related` to pull in parent and child processes.
-
-```
-PID 16747
-408 syscalls, active time: 12.278ms, total time: 11375.831ms
-
-                 	        	     total	       max	       avg	       min
-  syscall        	   count	      (ms)	      (ms)	      (ms)	      (ms)	errors
-  ---------------	--------	----------	----------	----------	----------	--------
-  wait4          	      24	 11363.553	  1008.295	   473.481	     0.006	ECHILD: 12
-  rt_sigprocmask 	      96	     6.760	     1.932	     0.070	     0.007
-  ---------------
-
-  Child PIDs:  23493, 23498, 23530, 23538, 23539
-
-  Slowest file open times for PID 16747:
-
-   open (ms)	      timestamp	        error     	   file name
-  ----------	---------------	   ---------------	   ---------
-       0.041	11:29:54.146422	          -       	   /dev/null
-       0.030	11:29:49.112721	          -       	   /dev/null
-```
-
----
-
-`-s, --sort <SORT_BY>`
-
-Which field to sort base summary and `-d/--details` by
-
-**Option for <SORT_BY>:**
-```rb
-   active_time   # Time spent by PID on active tasks
-   children   # The number of child PIDs created by PID
-   pid   # PID number
-   syscalls   # The number of syscalls made by the PID
-   total_time   # Time PID was alive, includes waiting
-   user_time   # Time spent by PID on userland tasks
-```
 
 ### Interpreting Output
 
 `strace` will significantly slow down syscalls execution, so do not consider the times listed as accurate when comparing to how a program performs normally.
 
 That said, it is very useful for understanding what calls are made and their _relative_ cost.  
-
-Here's a comparison of two git processes on different infrastructure.
-
-  * Example 1 spends ~90 out of 112ms on I/O operations `read`, `open`, and `close`.
-  * Example 2 is not bound by a specific type of action, but syscalls in general are slower.
-    * 59 calls to `rt_sigaction` take 1ms for example 1, but 21ms for example 2.
-    * 33 calls to `mmap` take < 1ms for example 1, but 27 calls to it take 12ms for example 2.
-    * Most other syscalls are significantly slower, with the exceptions of calls that rely on the filesystem.
-
-Based on this, we can say that example 1 is bottlenecked by block I/O, while example 2 is bound by general system performance - perhaps high load.
 
 #### Example 1
 
@@ -327,3 +400,13 @@ PID 64205
        0.739    14:38:21.775371           -           /var/opt/gitlab-data/home/.gitconfig
        0.598    14:38:21.663682        ENOENT         /opt/gitlab/embedded/lib/librt.so.1
 ```
+
+Here's a comparison of two git processes on different infrastructure.
+
+  * Example 1 spends ~90 out of 112ms on I/O operations `read`, `open`, and `close`.
+  * Example 2 is not bound by a specific type of action, but syscalls in general are slower.
+    * 59 calls to `rt_sigaction` take 1ms for example 1, but 21ms for example 2.
+    * 33 calls to `mmap` take < 1ms for example 1, but 27 calls to it take 12ms for example 2.
+    * Most other syscalls are significantly slower, with the exceptions of calls that rely on the filesystem.
+
+Based on this, we can say that example 1 is bottlenecked by block I/O, while example 2 is bound by general system performance - perhaps high load.
