@@ -506,8 +506,7 @@ mod tests {
 
     #[test]
     fn pid_summary_total_time_correct() {
-        let input = r##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
-566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+        let input = r##"566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:50.000000 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:51.000000 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
@@ -515,6 +514,16 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 4000.0);
+    }
+
+    #[test]
+    fn pid_summary_total_time_syscall_starts_pre_strace_correct() {
+        let input = r##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <100.000000>
+566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
+        assert_eq!(summary.pid_summaries[&566].total_time, 101_000.0);
     }
 
     #[test]
