@@ -67,8 +67,8 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                         "time",
                     ]),
             ))
-        .subcommand(SubCommand::with_name("histogram")
-            .about("Prints a log\u{2082} scale histogram of the execution times in \u{03BC}secs for <SYSCALL>")
+        .subcommand(SubCommand::with_name("quantize")
+            .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
             .arg(
                 Arg::with_name("syscall")
                     .help("Syscall to analyze")

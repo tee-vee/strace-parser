@@ -23,7 +23,7 @@ enum SubCmd {
     Exec,
     Files,
     Io,
-    Histogram,
+    Quantize,
     List,
     Summary,
 }
@@ -89,7 +89,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
             let pids_to_print = select_pids(&args, &session_summary)?;
             session_summary.print_exec_list(&pids_to_print)
         }
-        SubCmd::Histogram => {
+        SubCmd::Quantize => {
             let pids_to_print = select_pids(&args, &session_summary)?;
             let syscall = args.value_of("syscall").unwrap_or_default();
             histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
@@ -134,7 +134,7 @@ fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<
         ("exec", Some(args)) => (SubCmd::Exec, args),
         ("files", Some(args)) => (SubCmd::Files, args),
         ("io", Some(args)) => (SubCmd::Io, args),
-        ("histogram", Some(args)) => (SubCmd::Histogram, args),
+        ("quantize", Some(args)) => (SubCmd::Quantize, args),
         ("list_pids", Some(args)) => (SubCmd::List, args),
         ("summary", Some(args)) => (SubCmd::Summary, args),
         _ => unreachable!(),
