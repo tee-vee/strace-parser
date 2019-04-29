@@ -1,7 +1,7 @@
-use crate::Pid;
-use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use clap::{App, AppSettings, Arg, SubCommand};
+use strace_parse::Pid;
 
-pub fn cli_args<'a>() -> ArgMatches<'a> {
+pub fn cli_args() -> App<'static, 'static> {
     App::new("strace parser")
         .version(clap::crate_version!())
         .author(clap::crate_authors!())
@@ -199,7 +199,6 @@ pub fn cli_args<'a>() -> ArgMatches<'a> {
                         "user_time",
                     ]),
             ))
-        .get_matches()
 }
 
 fn validate_pid(p: String) -> Result<(), String> {

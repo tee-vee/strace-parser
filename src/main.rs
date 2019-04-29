@@ -29,14 +29,13 @@ enum SubCmd {
 }
 
 fn main() {
-    let app_matches = cli::cli_args();
+    let app_matches = cli::cli_args().get_matches();
 
     if let Err(e) = execute(app_matches) {
         eprintln!("{}", e);
         std::process::exit(1);
     }
 }
-
 
 fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
     let file_name = app_matches.value_of("INPUT").ok_or("Missing filename")?;
@@ -125,7 +124,6 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
     };
 
     Ok(())
-
 }
 
 fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<'a>) {

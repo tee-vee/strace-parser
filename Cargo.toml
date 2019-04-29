@@ -3,16 +3,21 @@ name = "strace-parser"
 version = "0.5.0"
 authors = ["Will Chandler <wchandler@gitlab.com>"]
 edition = "2018"
+build = "build.rs"
 
 [dependencies]
 chrono = "0.4"
-clap = "2.32.0"
+clap = "2.33.0"
 memmap = "0.7"
 strace-parse = { path = "strace-parse" }
 
 [dev-dependencies]
 criterion = "0.2"
 rayon = "1.0"
+
+[build-dependencies]
+clap = "2.33.0"
+strace-parse = { path = "strace-parse" }
 
 [workspace]
 
