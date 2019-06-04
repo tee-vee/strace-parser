@@ -13,8 +13,11 @@ It can generate the following metrics:
    * A list of all read/write calls made in session
    * A histogram showing the quantized distribution of execution times for a given syscall
 
-**NOTE**: `strace` must be run with the `-tt -T -f` flags for the required data
-to be captured. Including `-yyy` will provide file details in the `io` subcommand.
+**NOTE**: `strace` must be run with the at least the `-tt -T -f` flags for
+required data to be captured. Including `-yyy` will provide file details in the
+`io` subcommand.
+
+I recommend using `strace -fttTyyy -s 1024` as default flags to use.
 
 ## Building
 
