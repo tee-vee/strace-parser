@@ -85,7 +85,8 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
             session_summary.print_opened_files(&pids_to_print, &syscall_data, sort_by)
         }
         SubCmd::Exec => {
-            let pids_to_print = select_pids(&args, &session_summary)?;
+            let mut pids_to_print = select_pids(&args, &session_summary)?;
+            pids_to_print.sort();
             session_summary.print_exec_list(&pids_to_print)
         }
         SubCmd::Quantize => {
