@@ -125,7 +125,7 @@ pub fn cli_args() -> App<'static, 'static> {
                     .help("Include parent and child PIDs of <PIDS> in results")
                     .requires("pid"),
             ))
-        .subcommand(SubCommand::with_name("list_pids")
+        .subcommand(SubCommand::with_name("list-pids")
             .about("List of PIDs and their syscall stats")
             .arg(
                 Arg::with_name("count")

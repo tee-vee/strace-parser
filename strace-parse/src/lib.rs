@@ -2,7 +2,6 @@
 
 use self::pid_summary::PidSummary;
 use self::sort_by::{SortBy, SortEventsBy};
-use fxhash::FxBuildHasher;
 
 pub mod file_data;
 pub mod histogram;
@@ -16,5 +15,5 @@ pub mod syscall_stats;
 pub mod time;
 
 pub type Pid = i32;
-pub type HashMap<K, V> = rayon_hash::HashMap<K, V, FxBuildHasher>;
-pub type HashSet<T> = rayon_hash::HashSet<T, FxBuildHasher>;
+pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
+pub type HashSet<T> = hashbrown::HashSet<T>;

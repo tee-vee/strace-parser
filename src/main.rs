@@ -134,7 +134,7 @@ fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<
         ("files", Some(args)) => (SubCmd::Files, args),
         ("io", Some(args)) => (SubCmd::Io, args),
         ("quantize", Some(args)) => (SubCmd::Quantize, args),
-        ("list_pids", Some(args)) => (SubCmd::List, args),
+        ("list-pids", Some(args)) => (SubCmd::List, args),
         ("summary", Some(args)) => (SubCmd::Summary, args),
         _ => unreachable!(),
     }
