@@ -38,7 +38,7 @@ On the stable compiler build with `cargo build --release`.  On nightly you can u
   * `files` - List files opened
   * `help` - Print a brief help message
   * `io` - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
-  * `list_pids` - List of PIDs and their syscall stats
+  * `list-pids` - List of PIDs and their syscall stats
   * `pid` - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
 * `quantize` - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
   * `summary` - Overview of PIDs in session
@@ -86,11 +86,11 @@ sys    12m17.512s
 ```
 ---
 
-#### list_pids
+#### list-pids
 
 Print a list of the syscall stats of the top PIDs.
 
-`strace-parser <INPUT> summary [OPTIONS]`
+`strace-parser <INPUT> list-pids [OPTIONS]`
 
 **Options**:
 
