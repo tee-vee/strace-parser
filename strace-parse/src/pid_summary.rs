@@ -36,6 +36,8 @@ pub struct PidSummary<'a> {
     pub system_wait_time: f32,
     pub user_time: f32,
     pub total_time: f32,
+    pub start_time: &'a str,
+    pub end_time: &'a str,
     pub syscall_stats: Vec<SyscallStats<'a>>,
     pub parent_pid: Option<Pid>,
     pub child_pids: Vec<Pid>,
@@ -51,8 +53,13 @@ impl<'a> fmt::Display for PidSummary<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "{} syscalls, active time: {:.3}ms, user time: {:.3}ms, total time: {:.3}ms\n",
+            "  {} syscalls, active time: {:.3}ms, user time: {:.3}ms, total time: {:.3}ms",
             self.syscall_count, self.system_active_time, self.user_time, self.total_time
+        )?;
+        writeln!(
+            f,
+            "  start time: {}    end time: {}\n",
+            self.start_time, self.end_time
         )?;
         writeln!(
             f,
@@ -106,6 +113,8 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             system_wait_time,
             user_time,
             total_time,
+            start_time,
+            end_time,
             syscall_stats: syscall_stats.to_vec(),
             parent_pid: None,
             child_pids: pid_data.child_pids.clone(),

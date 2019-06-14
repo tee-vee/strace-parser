@@ -244,7 +244,7 @@ impl<'a> SessionSummary<'a> {
         )?;
 
         for (pid, pid_summary) in self.to_sorted(sort_by).iter().take(count) {
-            writeln!(stdout(), "PID {}", pid)?;
+            writeln!(stdout(), "PID {}\n", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
             if pid_summary.execve.is_some() {
@@ -270,7 +270,7 @@ impl<'a> SessionSummary<'a> {
 
         for pid in pids {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
-                writeln!(stdout(), "\nPID {}", pid)?;
+                writeln!(stdout(), "\nPID {}\n", pid)?;
                 writeln!(stdout(), "{}  ---------------\n", pid_summary)?;
 
                 pid_summary.print_exec()?;
