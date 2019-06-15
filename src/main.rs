@@ -17,6 +17,9 @@ use strace_parse::Pid;
 mod check_flags;
 mod cli;
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[derive(Clone, Copy, Debug)]
 enum SubCmd {
     Details,
