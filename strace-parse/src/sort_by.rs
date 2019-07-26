@@ -74,7 +74,6 @@ impl FromStr for SortEventsBy {
 #[derive(Clone, Copy, Debug)]
 pub struct ParseSortError;
 
-
 impl fmt::Display for ParseSortError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Invalid 'sort' value")
@@ -86,7 +85,7 @@ impl error::Error for ParseSortError {
         "Invalid 'sort' value"
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         None
     }
 }
