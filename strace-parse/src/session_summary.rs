@@ -365,8 +365,8 @@ impl<'a> SessionSummary<'a> {
         match sort_by {
             SortEventsBy::Duration => {
                 open_events.par_sort_by(|x, y| {
-                    (x.duration)
-                        .partial_cmp(&y.duration)
+                    (y.duration)
+                        .partial_cmp(&x.duration)
                         .expect("Invalid comparison on io durations")
                 });
             }
