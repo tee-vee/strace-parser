@@ -27,7 +27,7 @@ pub struct PidData<'a> {
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
-    pub execve: Option<Vec<&'a str>>,
+    pub execve: Option<Vec<Vec<&'a str>>>,
 }
 
 impl<'a> PidData<'a> {
@@ -94,7 +94,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         }
         "execve" => {
             if let Some(ref e) = raw_data.execve {
-                pid_entry.execve = Some(e.clone());
+                if let Some(execs) = &mut pid_entry.execve {
+                    execs.push(e.clone());
+                } else {
+                    pid_entry.execve = Some(vec![e.clone()]);
+                }
             }
         }
         "open" | "openat" => {
@@ -144,8 +148,14 @@ fn coalesce_pid_data<'a>(
 
         pid_entry.io_events.extend(temp_pid_data.io_events);
 
-        if let Some(temp_execve) = temp_pid_data.execve {
-            pid_entry.execve = Some(temp_execve);
+        match (pid_entry.execve.as_mut(), temp_pid_data.execve) {
+            (Some(pid_exec), Some(temp_exec)) => {
+                for exec in temp_exec {
+                    pid_exec.push(exec);
+                }
+            }
+            (None, Some(temp_exec)) => pid_entry.execve = Some(temp_exec),
+            _ => {}
         }
     }
 }
@@ -201,6 +211,14 @@ mod tests {
         let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
         let pid_data_map = build_syscall_data(&input);
         assert!(pid_data_map[&13656].execve.is_some());
+    }
+
+    #[test]
+    fn syscall_data_captures_multiple_execve() {
+        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
+13656 10:54:02.442246 execve("/bin/ls", ["ls", "/usr"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(2, pid_data_map[&13656].execve.as_ref().unwrap().len());
     }
 
     #[test]
