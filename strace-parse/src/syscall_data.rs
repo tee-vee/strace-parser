@@ -27,7 +27,7 @@ pub struct PidData<'a> {
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
-    pub execve: Option<Vec<Vec<&'a str>>>,
+    pub execve: Option<Vec<RawExec<'a>>>,
 }
 
 impl<'a> PidData<'a> {
@@ -41,6 +41,18 @@ impl<'a> PidData<'a> {
             io_events: Vec::new(),
             execve: None,
         }
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct RawExec<'a> {
+    pub exec: Vec<&'a str>,
+    pub time: &'a str,
+}
+
+impl<'a> RawExec<'a> {
+    pub fn new(exec: Vec<&'a str>, time: &'a str) -> RawExec<'a> {
+        RawExec { exec, time }
     }
 }
 
@@ -93,11 +105,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
             }
         }
         "execve" => {
-            if let Some(ref e) = raw_data.execve {
+            if let Some(e) = raw_data.execve {
                 if let Some(execs) = &mut pid_entry.execve {
-                    execs.push(e.clone());
+                    execs.push(RawExec::new(e, raw_data.time));
                 } else {
-                    pid_entry.execve = Some(vec![e.clone()]);
+                    pid_entry.execve = Some(vec![RawExec::new(e, raw_data.time)]);
                 }
             }
         }
@@ -150,7 +162,7 @@ fn coalesce_pid_data<'a>(
 
         match (pid_entry.execve.as_mut(), temp_pid_data.execve) {
             (Some(pid_exec), Some(temp_exec)) => {
-                for exec in temp_exec {
+                for exec in temp_exec.into_iter() {
                     pid_exec.push(exec);
                 }
             }
