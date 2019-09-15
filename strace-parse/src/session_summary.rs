@@ -247,9 +247,9 @@ impl<'a> SessionSummary<'a> {
             writeln!(stdout(), "PID {}\n", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
-            if pid_summary.execve.is_some() {
+            if let Some(exec) = &pid_summary.execve {
                 writeln!(stdout())?;
-                pid_summary.print_exec()?;
+                writeln!(stdout(), "{}", exec)?;
             } else if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
                 writeln!(stdout())?;
             }
@@ -273,7 +273,9 @@ impl<'a> SessionSummary<'a> {
                 writeln!(stdout(), "\nPID {}\n", pid)?;
                 writeln!(stdout(), "{}  ---------------\n", pid_summary)?;
 
-                pid_summary.print_exec()?;
+                if let Some(exec) = &pid_summary.execve {
+                    writeln!(stdout(), "{}", exec)?;
+                }
                 pid_summary.print_related_pids(PrintAmt::All)?;
 
                 if let Some(pid_files) = file_times.get(&pid) {
@@ -323,8 +325,10 @@ impl<'a> SessionSummary<'a> {
 
         for pid in pids_to_print.iter() {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
-                if let Some((cmd, args)) = pid_summary.format_execve() {
-                    writeln!(stdout(), "  {: >7}    {: ^30}    {: <}", pid, cmd, args)?;
+                if let Some(exec) = &pid_summary.execve {
+                    for (cmd, args) in exec.iter() {
+                        writeln!(stdout(), "  {: >7}    {: ^30}    {: <}", pid, cmd, args)?;
+                    }
                 }
             }
         }
