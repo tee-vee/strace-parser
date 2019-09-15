@@ -1,3 +1,4 @@
+use crate::exec::Exec;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::time::parse_unix_timestamp;
@@ -41,7 +42,7 @@ pub struct PidSummary<'a> {
     pub syscall_stats: Vec<SyscallStats<'a>>,
     pub parent_pid: Option<Pid>,
     pub child_pids: Vec<Pid>,
-    pub execve: Option<Vec<&'a str>>,
+    pub execve: Option<Exec>,
 }
 
 pub enum PrintAmt {
@@ -107,6 +108,11 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
 
         let user_time = total_time - system_active_time - system_wait_time;
 
+        let execve = match &pid_data.execve {
+            Some(e) => Some(Exec::new(e.clone())),
+            None => None,
+        };
+
         PidSummary {
             syscall_count,
             system_active_time,
@@ -118,46 +124,12 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             syscall_stats: syscall_stats.to_vec(),
             parent_pid: None,
             child_pids: pid_data.child_pids.clone(),
-            execve: pid_data.execve.clone(),
+            execve: execve,
         }
     }
 }
 
 impl<'a> PidSummary<'a> {
-    pub fn format_execve(&self) -> Option<(String, String)> {
-        if let Some(execve) = &self.execve {
-            let mut args_iter = execve.iter();
-
-            let cmd = args_iter
-                .next()
-                .and_then(|c| c.get(1..c.len() - 2))
-                .unwrap_or_default()
-                .to_string();
-
-            let mut args = args_iter
-                .skip(1)
-                .map(|a| a.trim_end_matches(','))
-                .fold(String::new(), |s, arg| s + arg + " ");
-
-            if execve.iter().any(|s| s.ends_with("],")) && args.len() > 1 {
-                args.insert(0, '[');
-            }
-
-            Some((cmd, args))
-        } else {
-            None
-        }
-    }
-
-    pub fn print_exec(&self) -> Result<(), Error> {
-        if let Some((cmd, args)) = self.format_execve() {
-            writeln!(stdout(), "  Program Executed: {}", cmd)?;
-            writeln!(stdout(), "  Args: {}\n", args)?;
-        }
-
-        Ok(())
-    }
-
     pub fn print_related_pids(&self, print_amt: PrintAmt) -> Result<(), Error> {
         if let Some(p) = self.parent_pid {
             writeln!(stdout(), "  Parent PID:  {}", p)?;
