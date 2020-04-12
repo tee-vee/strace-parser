@@ -16,5 +16,5 @@ pub mod syscall_stats;
 pub mod time;
 
 pub type Pid = i32;
-pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
-pub type HashSet<T> = hashbrown::HashSet<T>;
+pub type HashMap<K, V> = std::collections::HashMap<K, V>;
+pub type HashSet<T> = std::collections::HashSet<T>;
