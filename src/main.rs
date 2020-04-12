@@ -17,6 +17,7 @@ use strace_parse::Pid;
 mod check_flags;
 mod cli;
 
+#[cfg(not(target_env = "musl"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
