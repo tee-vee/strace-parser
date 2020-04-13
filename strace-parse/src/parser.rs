@@ -21,18 +21,8 @@ pub enum CallStatus {
 }
 
 pub fn parse_line(line: &str) -> Option<RawData> {
-    let tokens = split_line(line);
+    let tokens = line.split_ascii_whitespace();
     parse_tokens(tokens)
-}
-
-#[cfg(feature = "nightly")]
-fn split_line(line: &str) -> std::str::SplitAsciiWhitespace {
-    line.split_ascii_whitespace()
-}
-
-#[cfg(not(feature = "nightly"))]
-fn split_line(line: &str) -> std::str::SplitWhitespace {
-    line.split_whitespace()
 }
 
 fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
@@ -336,5 +326,4 @@ mod tests {
             })
         );
     }
-
 }
