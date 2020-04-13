@@ -1,5 +1,3 @@
-#![cfg_attr(feature = "nightly", feature(split_ascii_whitespace))]
-
 use clap::ArgMatches;
 use memmap::MmapOptions;
 use std::error::Error;

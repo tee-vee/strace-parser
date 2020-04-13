@@ -21,9 +21,9 @@ I recommend using `strace -fttTyyy -s 1024` as default flags to use.
 
 ## Building
 
-You'll need the Rust compiler, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
+You'll need the Rust compiler 1.34 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
-On the stable compiler build with `cargo build --release`.  On nightly you can use `cargo build --release --features nightly` for a ~10% performance boost.
+Build with `cargo build --release`, the binary will be located at `target/release/strace-parser`.
 
 ## Usage
 
