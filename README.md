@@ -19,6 +19,10 @@ required data to be captured. Including `-yyy` will provide file details in the
 
 I recommend using `strace -fttTyyy -s 1024` as default flags to use.
 
+**NOTE**: Because this tools slows down the target system,
+prefer to use it in a reproduced testing environment,
+rather than on the customer's infrastructure.
+
 ## Building
 
 You'll need the Rust compiler 1.34 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
