@@ -19,9 +19,10 @@ required data to be captured. Including `-yyy` will provide file details in the
 
 I recommend using `strace -fttTyyy -s 1024` as default flags to use.
 
-**NOTE**: Because this tools slows down the target system,
-prefer to use it in a reproduced testing environment,
-rather than on the customer's infrastructure.
+**NOTE**: Because `strace` may slow down the target system by up to 10x,
+it is not recommended for use in a production environment
+except as a last resort. See [this article](http://www.brendangregg.com/blog/2014-05-11/strace-wow-much-syscall.html)
+for more information on the performance impacts of `strace`.
 
 ## Building
 
