@@ -1,4 +1,4 @@
-**Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/tags)**
+**Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/-/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/-/tags)**
 
 A small tool to analyze raw `strace` data.
 
