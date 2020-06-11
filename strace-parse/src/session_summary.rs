@@ -349,21 +349,18 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nPrograms Executed\n")?;
         writeln!(
             stdout(),
-            "  {: >7}    {: ^30}    {: <}",
+            "  {: <6}    {: <16}    {: <}",
             "pid",
+            "time",
             "program",
-            "args",
         )?;
-        writeln!(
-            stdout(),
-            "  -------              ---------               ------"
-        )?;
+        writeln!(stdout(), "  ------    ---------------     ------")?;
 
         for pid in pids_to_print.iter() {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 if let Some(exec) = &pid_summary.execve {
-                    for (cmd, args) in exec.iter() {
-                        writeln!(stdout(), "  {: >7}    {: ^30}    {: <}", pid, cmd, args)?;
+                    for (cmd, time) in exec.iter() {
+                        writeln!(stdout(), "  {: <6}    {: <16}    {: <}", pid, time, cmd)?;
                     }
                 }
             }

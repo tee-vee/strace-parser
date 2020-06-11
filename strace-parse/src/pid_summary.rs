@@ -1,4 +1,4 @@
-use crate::exec::Exec;
+use crate::exec::Execs;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::time::parse_unix_timestamp;
@@ -43,7 +43,7 @@ pub struct PidSummary<'a> {
     pub parent_pid: Option<Pid>,
     pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
-    pub execve: Option<Exec>,
+    pub execve: Option<Execs>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,7 +111,7 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
         let user_time = total_time - system_active_time - system_wait_time;
 
         let execve = match &pid_data.execve {
-            Some(e) => Some(Exec::new(e.clone())),
+            Some(e) => Some(Execs::new(e.clone())),
             None => None,
         };
 
