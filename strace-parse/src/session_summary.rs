@@ -11,6 +11,7 @@ use std::io::{prelude::*, stdout, Error};
 
 static PRINT_COUNT: usize = 10;
 
+#[derive(Default)]
 pub struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
     all_time: f32,
@@ -23,12 +24,12 @@ impl<'a> SessionSummary<'a> {
         session_stats: &HashMap<Pid, Vec<SyscallStats<'a>>>,
         pid_data: &'a HashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
-        let mut summary = SessionSummary {
-            pid_summaries: HashMap::default(),
-            all_time: 0.0,
-            all_active_time: 0.0,
-            all_user_time: 0.0,
-        };
+        let mut summary = SessionSummary::default(); //{
+                                                     //    pid_summaries: HashMap::default(),
+                                                     //    all_time: 0.0,
+                                                     //    all_active_time: 0.0,
+                                                     //    all_user_time: 0.0,
+                                                     //};
 
         for (pid, syscall_stats) in session_stats {
             summary.pid_summaries.insert(
@@ -59,13 +60,15 @@ impl<'a> SessionSummary<'a> {
 
         let pid_graph = summary.build_pid_graph();
 
-        for (pid, pid_summary) in summary.pid_summaries.iter_mut() {
-            let mut parent_graph = pid_graph.neighbors_directed(*pid, Incoming);
+        for (&pid, pid_summary) in summary.pid_summaries.iter_mut() {
+            let mut parent_graph = pid_graph.neighbors_directed(pid, Incoming);
 
             if let Some(parent) = parent_graph.next() {
                 pid_summary.parent_pid = Some(parent);
             }
         }
+
+        summary.populate_threads();
 
         summary
     }
@@ -118,15 +121,33 @@ impl<'a> SessionSummary<'a> {
     fn build_pid_graph(&self) -> GraphMap<Pid, Pid, Directed> {
         let mut pid_graph = DiGraphMap::new();
 
-        for (pid, pid_summary) in self.pid_summaries.iter() {
+        for (&pid, pid_summary) in self.pid_summaries.iter() {
             if !pid_summary.child_pids.is_empty() {
-                for child in &pid_summary.child_pids {
-                    pid_graph.add_edge(*pid, *child, 1);
+                for &child in &pid_summary.child_pids {
+                    pid_graph.add_edge(pid, child, 1);
                 }
             }
         }
 
         pid_graph
+    }
+
+    fn populate_threads(&mut self) {
+        let mut thread_map = HashMap::new();
+
+        for (&pid, pid_summary) in &self.pid_summaries {
+            for &thread in &pid_summary.threads {
+                let thread_entry = thread_map.entry(thread).or_insert_with(Vec::new);
+                thread_entry.push(pid);
+                thread_entry.extend(pid_summary.threads.iter().filter(|&&t| t != thread));
+            }
+        }
+
+        for (pid, threads) in thread_map.into_iter() {
+            if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
+                pid_summary.threads.extend(threads);
+            }
+        }
     }
 
     pub fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
@@ -139,19 +160,31 @@ impl<'a> SessionSummary<'a> {
                     related_pids.insert(parent);
                 }
 
-                for child in &pid_summary.child_pids {
-                    related_pids.insert(*child);
-                }
+                related_pids.extend(&pid_summary.threads);
+                related_pids.extend(&pid_summary.child_pids);
             }
         }
 
         related_pids.into_iter().collect::<Vec<_>>()
     }
 
+    pub fn threads(&self, pids: &[Pid]) -> Vec<Pid> {
+        let mut threads = BTreeSet::new();
+
+        for &pid in pids {
+            if let Some(pid_summary) = self.pid_summaries.get(&pid) {
+                threads.insert(pid);
+                threads.extend(&pid_summary.threads);
+            }
+        }
+
+        threads.into_iter().collect::<Vec<_>>()
+    }
+
     pub fn validate_pids(&self, pids: &[Pid]) -> Result<Vec<Pid>, Error> {
         let (valid_pids, invalid_pids): (BTreeSet<Pid>, BTreeSet<Pid>) = pids
             .iter()
-            .cloned()
+            .copied()
             .partition(|p| self.pid_summaries.get(p).is_some());
 
         for pid in invalid_pids {
@@ -250,7 +283,10 @@ impl<'a> SessionSummary<'a> {
             if let Some(exec) = &pid_summary.execve {
                 writeln!(stdout())?;
                 writeln!(stdout(), "{}", exec)?;
-            } else if pid_summary.parent_pid.is_some() || !pid_summary.child_pids.is_empty() {
+            } else if pid_summary.parent_pid.is_some()
+                || !pid_summary.threads.is_empty()
+                || !pid_summary.child_pids.is_empty()
+            {
                 writeln!(stdout())?;
             }
             pid_summary.print_related_pids(PrintAmt::Some(PRINT_COUNT))?;
@@ -542,5 +578,22 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert!(summary.pid_summaries[&566].child_pids.contains(&7390));
+    }
+
+    #[test]
+    fn pid_summary_threads_symetrical() {
+        let input = r##"1875  1546841132.010874 clone(child_stack=0x7f3f8dffef70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8dfff9d0, tls=0x7f3f8dfff700, child_tidptr=0x7f3f8dfff9d0) = 20222 <0.000037>
+1875  1546841132.011524 clone(child_stack=0x7f3f8d5fdf70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8d5fe9d0, tls=0x7f3f8d5fe700, child_tidptr=0x7f3f8d5fe9d0) = 20223 <0.000031>
+20222 1546841132.017849 set_robust_list(0x7f3f8dfff9e0, 24) = 0 <0.000009>
+20223 1546841132.016568 set_robust_list(0x7f3f8d5fe9e0, 24) = 0 <0.000010>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
+        assert!(summary.pid_summaries[&1875].threads.contains(&20222));
+        assert!(summary.pid_summaries[&1875].threads.contains(&20223));
+        assert!(summary.pid_summaries[&20222].threads.contains(&1875));
+        assert!(summary.pid_summaries[&20222].threads.contains(&20223));
+        assert!(summary.pid_summaries[&20223].threads.contains(&1875));
+        assert!(summary.pid_summaries[&20223].threads.contains(&20222));
     }
 }

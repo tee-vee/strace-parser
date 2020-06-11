@@ -6,11 +6,17 @@ pub struct RawData<'a> {
     pub time: &'a str,
     pub syscall: &'a str,
     pub duration: Option<f32>,
-    pub file: Option<&'a str>,
     pub error: Option<&'a str>,
     pub rtn_cd: Option<i32>,
-    pub execve: Option<Vec<&'a str>>,
     pub call_status: CallStatus,
+    pub other: Option<OtherFields<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OtherFields<'a> {
+    Execve(Vec<&'a str>),
+    File(&'a str),
+    Clone(ProcType),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,6 +25,37 @@ pub enum CallStatus {
     Resumed,
     Started,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ProcType {
+    Thread,
+    Process,
+}
+
+impl<'a> RawData<'a> {
+    pub fn file(&self) -> Option<&'a str> {
+        match self.other {
+            Some(OtherFields::File(f)) => Some(f),
+            _ => None,
+        }
+    }
+
+    pub fn execve(&self) -> Option<&[&'a str]> {
+        match &self.other {
+            Some(OtherFields::Execve(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn proc_type(&self) -> Option<ProcType> {
+        match self.other {
+            Some(OtherFields::Clone(p)) => Some(p),
+            _ => None,
+        }
+    }
+}
+
+const CLONE_THREAD: &str = "CLONE_THREAD";
 
 pub fn parse_line(line: &str) -> Option<RawData> {
     let tokens = line.split_ascii_whitespace();
@@ -52,8 +89,7 @@ where
     };
 
     let syscall;
-    let mut file = None;
-    let mut execve = None;
+    let mut other = None;
 
     match call_status {
         CallStatus::Resumed => {
@@ -64,9 +100,18 @@ where
                     .filter(|c| c.is_ascii_alphabetic())
                     .is_some()
             })?;
+
+            if syscall == "clone" {
+                let flags = tokens.nth(2)?;
+                if flags.contains(CLONE_THREAD) {
+                    other = Some(OtherFields::Clone(ProcType::Thread))
+                } else {
+                    other = Some(OtherFields::Clone(ProcType::Process))
+                }
+            }
         }
         CallStatus::Complete | CallStatus::Started => {
-            let mut syscall_split = syscall_token.split('(');
+            let mut syscall_split = syscall_token.splitn(2, '(');
 
             syscall = syscall_split.next().filter(|syscall_tok| {
                 syscall_tok
@@ -78,27 +123,42 @@ where
 
             match syscall {
                 "open" => {
-                    file = syscall_split.next().and_then(|f| f.get(1..f.len() - 2));
+                    if let Some(f) = syscall_split.next().and_then(|f| f.get(1..f.len() - 2)) {
+                        other = Some(OtherFields::File(f));
+                    }
                 }
                 "openat" => {
-                    file = tokens.next().and_then(|f| f.get(1..f.len() - 2));
+                    if let Some(f) = tokens.next().and_then(|f| f.get(1..f.len() - 2)) {
+                        other = Some(OtherFields::File(f));
+                    }
                 }
                 "execve" => {
                     if let Some(t) = syscall_split.next() {
                         let mut v = vec![t];
                         tokens
                             .by_ref()
-                            .take_while(|s| *s != "[/*" && *s != "/*")
+                            .take_while(|&s| s != "[/*" && s != "/*")
                             .for_each(|arg| v.push(arg));
 
-                        execve = Some(v);
+                        other = Some(OtherFields::Execve(v));
                     }
                 }
                 "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
                 | "write" => {
-                    file = syscall_split
+                    if let Some(f) = syscall_split
                         .next()
-                        .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(0..s.len() - 2)));
+                        .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(0..s.len() - 2)))
+                    {
+                        other = Some(OtherFields::File(f));
+                    }
+                }
+                "clone" if matches!(call_status, CallStatus::Complete) => {
+                    let flags = tokens.next()?;
+                    if flags.contains(CLONE_THREAD) {
+                        other = Some(OtherFields::Clone(ProcType::Thread));
+                    } else {
+                        other = Some(OtherFields::Clone(ProcType::Process));
+                    }
                 }
                 _ => {}
             }
@@ -117,7 +177,7 @@ where
     let mut error = None;
 
     if duration.is_some() {
-        let mut end_tokens = tokens.rev().take_while(|t| *t != "=").peekable();
+        let mut end_tokens = tokens.rev().take_while(|&t| t != "=").peekable();
 
         while let Some(token) = end_tokens.next() {
             if token.starts_with('E') {
@@ -139,11 +199,10 @@ where
         time,
         syscall,
         duration,
-        file,
         error,
         rtn_cd,
-        execve,
         call_status,
+        other,
     })
 }
 
@@ -173,11 +232,10 @@ mod tests {
                 time: "11:29:49.112721",
                 syscall: "open",
                 duration: Some(0.000030),
-                file: Some("/dev/null"),
                 error: None,
                 rtn_cd: None,
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::File("/dev/null")),
             })
         );
     }
@@ -198,11 +256,10 @@ mod tests {
                 time: "09:07:12.773648",
                 syscall: "brk",
                 duration: Some(0.000011),
-                file: None,
                 error: None,
                 rtn_cd: None,
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: None,
             })
         );
     }
@@ -223,11 +280,10 @@ mod tests {
                 time: "11:29:49.112721",
                 syscall: "open",
                 duration: None,
-                file: Some("/dev/null"),
                 error: None,
                 rtn_cd: None,
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::File("/dev/null")),
             })
         );
     }
@@ -242,11 +298,10 @@ mod tests {
                 time: "11:29:49.112721",
                 syscall: "open",
                 duration: Some(0.000030),
-                file: Some("/dev/null"),
                 error: None,
                 rtn_cd: None,
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::File("/dev/null")),
             })
         );
     }
@@ -261,11 +316,10 @@ mod tests {
                 time: "11:29:49.113885",
                 syscall: "clone",
                 duration: Some(0.000118),
-                file: None,
                 error: None,
                 rtn_cd: None,
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::Clone(ProcType::Process)),
             })
         );
     }
@@ -280,11 +334,10 @@ mod tests {
                 time: "11:29:49.113885",
                 syscall: "clone",
                 duration: Some(0.000118),
-                file: None,
                 error: None,
                 rtn_cd: Some(23151),
-                execve: None,
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::Clone(ProcType::Process)),
             })
         );
     }
@@ -299,11 +352,14 @@ mod tests {
                 time: "10:53:02.442246",
                 syscall: "execve",
                 duration: Some(0.000229),
-                file: None,
                 error: None,
                 rtn_cd: None,
-                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",]),
                 call_status: CallStatus::Complete,
+                other: Some(OtherFields::Execve(vec![
+                    "\"/bin/sleep\",",
+                    "[\"sleep\",",
+                    "\"1\"],",
+                ])),
             })
         );
     }
@@ -318,11 +374,86 @@ mod tests {
                 time: "10:53:02.442246",
                 syscall: "execve",
                 duration: None,
-                file: None,
                 error: None,
                 rtn_cd: None,
-                execve: Some(vec!["\"/bin/sleep\",", "[\"sleep\",", "\"1\"],",]),
                 call_status: CallStatus::Started,
+                other: Some(OtherFields::Execve(vec![
+                    "\"/bin/sleep\",",
+                    "[\"sleep\",",
+                    "\"1\"],",
+                ])),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_complete_clone_thread() {
+        let input = r##"98252 03:48:28.335770 clone(child_stack=0x7f202ac6bf70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f202ac6c9d0, tls=0x7f202ac6c700, child_tidptr=0x7f202ac6c9d0) = 98253 <0.000038>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 98252,
+                time: "03:48:28.335770",
+                syscall: "clone",
+                duration: Some(0.000038),
+                error: None,
+                rtn_cd: Some(98253),
+                call_status: CallStatus::Complete,
+                other: Some(OtherFields::Clone(ProcType::Thread)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_complete_clone_proc() {
+        let input = r##"98245 03:48:28.282463 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fc502200a50) = 98246 <0.000068>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 98245,
+                time: "03:48:28.282463",
+                syscall: "clone",
+                duration: Some(0.000068),
+                error: None,
+                rtn_cd: Some(98246),
+                call_status: CallStatus::Complete,
+                other: Some(OtherFields::Clone(ProcType::Process)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_resumed_clone_thread() {
+        let input = r##"111462 08:55:58.704022 <... clone resumed> child_stack=0x7f001bffdfb0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f001bffe9d0, tls=0x7f001bffe700, child_tidptr=0x7f001bffe9d0) = 103674 <0.000060>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 111462,
+                time: "08:55:58.704022",
+                syscall: "clone",
+                duration: Some(0.000060),
+                error: None,
+                rtn_cd: Some(103674),
+                call_status: CallStatus::Resumed,
+                other: Some(OtherFields::Clone(ProcType::Thread)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_resumed_clone_proc() {
+        let input = r##"98781 10:30:46.143570 <... clone resumed> child_stack=0, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 56089 <0.004605>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 98781,
+                time: "10:30:46.143570",
+                syscall: "clone",
+                duration: Some(0.004605),
+                error: None,
+                rtn_cd: Some(56089),
+                call_status: CallStatus::Resumed,
+                other: Some(OtherFields::Clone(ProcType::Process)),
             })
         );
     }

@@ -41,10 +41,12 @@ pub struct PidSummary<'a> {
     pub end_time: &'a str,
     pub syscall_stats: Vec<SyscallStats<'a>>,
     pub parent_pid: Option<Pid>,
+    pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
     pub execve: Option<Exec>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PrintAmt {
     All,
     Some(usize),
@@ -122,9 +124,10 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             start_time,
             end_time,
             syscall_stats: syscall_stats.to_vec(),
-            parent_pid: None,
+            parent_pid: None, // parent is calculated later on
+            threads: pid_data.threads.clone(),
             child_pids: pid_data.child_pids.clone(),
-            execve: execve,
+            execve,
         }
     }
 }
@@ -135,14 +138,22 @@ impl<'a> PidSummary<'a> {
             writeln!(stdout(), "  Parent PID:  {}", p)?;
         }
 
-        if !self.child_pids.is_empty() {
+        PidSummary::print_pids(&self.threads, "Threads", print_amt)?;
+        PidSummary::print_pids(&self.child_pids, "Child PIDs", print_amt)?;
+
+        Ok(())
+    }
+
+    fn print_pids(pids: &[Pid], name: &str, print_amt: PrintAmt) -> Result<(), Error> {
+        if !pids.is_empty() {
             let print_ct = match print_amt {
-                PrintAmt::All => self.child_pids.len(),
+                PrintAmt::All => pids.len(),
                 PrintAmt::Some(c) => c,
             };
-            write!(stdout(), "  Child PIDs:  ")?;
-            if self.child_pids.len() > print_ct {
-                for (i, p) in self.child_pids.iter().enumerate().take(print_ct) {
+
+            write!(stdout(), "  {}:  ", name)?;
+            if pids.len() > print_ct {
+                for (i, p) in pids.iter().enumerate().take(print_ct) {
                     if i % 10 == 0 && i != 0 {
                         write!(stdout(), "\n               ")?;
                     }
@@ -152,14 +163,14 @@ impl<'a> PidSummary<'a> {
                         write!(stdout(), "{} ", p)?;
                     }
                 }
-                writeln!(stdout(), "and {} more...", self.child_pids.len() - print_ct)?;
+                writeln!(stdout(), "and {} more...", pids.len() - print_ct)?;
             } else {
-                let mut child_pid_iter = self.child_pids.iter().enumerate().peekable();
-                while let Some((i, n)) = child_pid_iter.next() {
+                let mut pid_iter = pids.iter().enumerate().peekable();
+                while let Some((i, n)) = pid_iter.next() {
                     if i % 10 == 0 && i != 0 {
                         write!(stdout(), "\n               ")?;
                     }
-                    if child_pid_iter.peek().is_some() {
+                    if pid_iter.peek().is_some() {
                         write!(stdout(), "{}, ", n)?;
                     } else {
                         write!(stdout(), "{}", n)?;
@@ -187,6 +198,7 @@ impl<'a> PidSummary<'a> {
 
         // In some cases a syscall begun before strace may report
         // a run time greater than the timestamp span of the trace
+        // In this case we just use the timestamp span
         if timestamp_time > active_time + wait_time {
             timestamp_time
         } else {

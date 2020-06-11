@@ -32,7 +32,7 @@ impl Exec {
 
             if arg.len() > 1 && raw_exec.exec.iter().any(|s| s.ends_with("],")) {
                 arg.insert(0, '[');
-                arg.truncate(arg.rfind("]").unwrap_or_default() + 1);
+                arg.truncate(arg.rfind(']').unwrap_or_default() + 1);
             }
 
             cmds.push(cmd);

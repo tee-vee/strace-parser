@@ -35,6 +35,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .long("related")
                     .help("Include parent and child PIDs of <PIDS> in results")
                     .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("files")
             .about("List files opened")
@@ -66,7 +72,13 @@ pub fn cli_args() -> App<'static, 'static> {
                         "pid",
                         "time",
                     ]),
-            ))
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
+        ))
         .subcommand(SubCommand::with_name("quantize")
             .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
             .arg(
@@ -93,6 +105,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .long("related")
                     .help("Include parent and child PIDs of <PIDS> in results")
                     .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("io")
             .about("Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write")
@@ -105,8 +123,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .value_name("PIDS")
                     .multiple(true)
                     .validator(validate_pid),
-            )
-            .arg(
+            ).arg( Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                  .requires("pid"),
+            ).arg(
                 Arg::with_name("sort_by")
                     .short("s")
                     .long("sort")
@@ -118,11 +140,11 @@ pub fn cli_args() -> App<'static, 'static> {
                         "pid",
                         "time",
                     ]),
-            )
-            .arg( Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results")
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("list-pids")
@@ -169,6 +191,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .short("r")
                     .long("related")
                     .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("summary")

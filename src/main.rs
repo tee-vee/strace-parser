@@ -159,6 +159,9 @@ fn select_pids(
         if args.is_present("related") {
             let related_pids = session_summary.related_pids(&checked_pids);
             Ok(related_pids)
+        } else if args.is_present("threads") {
+            let threads = session_summary.threads(&checked_pids);
+            Ok(threads)
         } else {
             Ok(checked_pids)
         }

@@ -1,8 +1,9 @@
 use crate::parser;
-use crate::parser::RawData;
+use crate::parser::{OtherFields, ProcType, RawData};
 use crate::HashMap;
 use crate::Pid;
 use rayon::prelude::*;
+use std::convert::TryFrom;
 
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
@@ -24,6 +25,7 @@ pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub start_time: &'a str,
     pub end_time: &'a str,
+    pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
@@ -36,6 +38,7 @@ impl<'a> PidData<'a> {
             syscall_data: HashMap::default(),
             start_time: "zzzzz", // greater than any valid time str
             end_time: "00000",   // less than any valid time str
+            threads: Vec::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             io_events: Vec::new(),
@@ -53,6 +56,19 @@ pub struct RawExec<'a> {
 impl<'a> RawExec<'a> {
     pub fn new(exec: Vec<&'a str>, time: &'a str) -> RawExec<'a> {
         RawExec { exec, time }
+    }
+}
+
+impl<'a> TryFrom<RawData<'a>> for RawExec<'a> {
+    type Error = &'static str;
+
+    fn try_from(data: RawData<'a>) -> Result<Self, Self::Error> {
+        let t = data.time;
+        if let Some(OtherFields::Execve(v)) = data.other {
+            Ok(RawExec::new(v, t))
+        } else {
+            Err("No exec")
+        }
     }
 }
 
@@ -99,17 +115,21 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
     }
 
     match raw_data.syscall {
-        "clone" | "fork" | "vfork" => {
-            if let Some(child_pid) = raw_data.rtn_cd {
-                pid_entry.child_pids.push(child_pid as Pid);
+        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, raw_data.other) {
+            (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
+                pid_entry.child_pids.push(child_pid as Pid)
             }
-        }
+            (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
+                pid_entry.threads.push(child_pid as Pid)
+            }
+            _ => {}
+        },
         "execve" => {
-            if let Some(e) = raw_data.execve {
+            if let Ok(e) = RawExec::try_from(raw_data) {
                 if let Some(execs) = &mut pid_entry.execve {
-                    execs.push(RawExec::new(e, raw_data.time));
+                    execs.push(e);
                 } else {
-                    pid_entry.execve = Some(vec![RawExec::new(e, raw_data.time)]);
+                    pid_entry.execve = Some(vec![e]);
                 }
             }
         }
@@ -153,6 +173,8 @@ fn coalesce_pid_data<'a>(
         if temp_pid_data.end_time > pid_entry.end_time {
             pid_entry.end_time = temp_pid_data.end_time;
         }
+
+        pid_entry.threads.extend(temp_pid_data.threads);
 
         pid_entry.child_pids.extend(temp_pid_data.child_pids);
 
@@ -201,6 +223,13 @@ mod tests {
                 .collect::<Vec<(&str, i32)>>(),
             vec![("ENOTTY", 2)]
         );
+    }
+
+    #[test]
+    fn syscall_data_captures_thread() {
+        let input = r##"28898 21:16:52.387464 clone(child_stack=0x7f03e0beeff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f03e0bef9d0, tls=0x7f03e0bef700, child_tidptr=0x7f03e0bef9d0) = 28899 <0.000081>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        assert!(pid_data_map[&28898].threads.contains(&28899));
     }
 
     #[test]

@@ -17,7 +17,7 @@ jemallocator = "0.3.2"
 
 # Can't use criterion on musl as it uses proc macros
 [target.'cfg(not(target_env = "musl"))'.dev-dependencies]
-criterion = "0.3.1"
+criterion = "0.3.2"
 rayon = "1.3.0"
 
 [build-dependencies]
