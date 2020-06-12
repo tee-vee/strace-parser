@@ -44,6 +44,7 @@ pub struct PidSummary<'a> {
     pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
     pub execve: Option<Execs>,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,6 +129,7 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             threads: pid_data.threads.clone(),
             child_pids: pid_data.child_pids.clone(),
             execve,
+            exit_code: pid_data.exit_code,
         }
     }
 }

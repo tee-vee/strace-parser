@@ -27,24 +27,23 @@ impl Execs {
 
             let mut cmd = arg_iter
                 .next()
-                .map(|s| s.trim_start_matches('"'))
-                .map(|s| s.trim_end_matches(|c| c == ',' || c == '"'))
+                .map(|c| Execs::trim_arg(c))
                 .unwrap_or_default()
                 .to_string();
 
             cmd.push(' ');
 
-            cmd += arg_iter
-                .nth(1) // skip argv[0] as this is a repeat of cmd 99% of the time
-                .map(|s| s.trim_start_matches(|c| c == '[' || c == '"'))
-                .map(|s| s.trim_end_matches(|c| c == ']' || c == '"' || c == ','))
-                .unwrap_or_default();
+            cmd.push_str(
+                arg_iter
+                    .nth(1) // skip argv[0] as this is a repeat of cmd 99% of the time
+                    .map(|a| Execs::trim_arg(a))
+                    .unwrap_or_default(),
+            );
 
             cmd.push(' ');
 
             let full_cmd = arg_iter
-                .map(|a| a.trim_start_matches(|c| c == '[' || c == '"'))
-                .map(|a| a.trim_end_matches(|c| c == ']' || c == '"' || c == ','))
+                .map(|a| Execs::trim_arg(a))
                 .fold(cmd, |s, arg| s + arg + " ");
 
             cmds.push(full_cmd.trim().to_string());
@@ -57,13 +56,37 @@ impl Execs {
     pub fn iter(&self) -> Zip<Iter<String>, Iter<String>> {
         self.cmds.iter().zip(&self.times)
     }
+
+    pub fn replace_newlines(cmd: &str, ct: usize) -> String {
+        let mut whitespace = String::from("\n");
+        whitespace.push_str(&" ".repeat(ct));
+
+        cmd.replace(r#"\n"#, &whitespace)
+    }
+
+    fn trim_arg(arg: &str) -> &str {
+        let initial_trim = arg
+            .trim_start_matches(|c| c == '[')
+            .trim_end_matches(|c| c == ',' || c == ']');
+
+        // Only trim quotes if arg is fully quoted, other it's part of a quoted command
+        if initial_trim.starts_with('"') && initial_trim.ends_with('"') {
+            initial_trim.trim_start_matches('"').trim_end_matches('"')
+        } else {
+            initial_trim
+        }
+    }
 }
 
 impl fmt::Display for Execs {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut iter = self.iter().peekable();
         while let Some((cmd, time)) = iter.next() {
-            writeln!(f, "  Program Executed: {}", cmd)?;
+            writeln!(
+                f,
+                "  Program Executed: {}",
+                Execs::replace_newlines(cmd, 23)
+            )?;
             writeln!(f, "  Time: {}", time)?;
 
             if iter.peek().is_some() {
@@ -130,5 +153,28 @@ mod tests {
         assert_eq!(third_cmd, "/opt/gitlab/embedded/lib/ruby/gems/2.5.0/bin/ruby /opt/gitlab/embedded/bin/git-linguist --commit=95fd813967c6c18863ac4b1acb2ade9ba2c1c93b stats");
         assert_eq!(fourth_cmd, "/opt/gitlab/bin/ruby /opt/gitlab/embedded/bin/git-linguist --commit=95fd813967c6c18863ac4b1acb2ade9ba2c1c93b stats");
         assert_eq!(fifth_cmd, "/opt/gitlab/embedded/bin/ruby /opt/gitlab/embedded/bin/git-linguist --commit=95fd813967c6c18863ac4b1acb2ade9ba2c1c93b stats");
+    }
+
+    #[test]
+    fn exec_keeps_quoted_group() {
+        let input = r##"4135 14:08:51.762724 execve("/bin/bash", ["/bin/bash", "-c", "ls -la /etc | grep profile"], 0x7ffc1bafc638 /* 25 vars */) = 0 <0.000302>"##;
+        let mut pid_data_map = build_syscall_data(&input);
+        let execs = Execs::new(pid_data_map.remove(&4135).unwrap().execve.unwrap());
+
+        let cmd = execs.cmds.first().unwrap();
+        assert_eq!(cmd, r##"/bin/bash -c "ls -la /etc | grep profile""##);
+    }
+
+    #[test]
+    fn exec_does_not_strip_escaped_quotes() {
+        let input = r##"28919 21:16:56.608477 execve("/bin/sh", ["sh", "-c", "/opt/gitlab/bin/gitlab-psql -d gitlabhq_production -c \"SELECT table_name\n                 FROM information_schema.tables\n                WHERE table_catalog = 'gitlabhq_production'\n                  AND table_schema='public'\" -A | grep -x projects"], [/* 22 vars */] <unfinished ...>"##;
+        let mut pid_data_map = build_syscall_data(&input);
+        let execs = Execs::new(pid_data_map.remove(&28919).unwrap().execve.unwrap());
+
+        let cmd = execs.cmds.first().unwrap();
+        assert_eq!(
+            cmd,
+            r##"/bin/sh -c "/opt/gitlab/bin/gitlab-psql -d gitlabhq_production -c \"SELECT table_name\n FROM information_schema.tables\n WHERE table_catalog = 'gitlabhq_production'\n AND table_schema='public'\" -A | grep -x projects""##
+        );
     }
 }

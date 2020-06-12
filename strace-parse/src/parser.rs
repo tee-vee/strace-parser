@@ -17,6 +17,7 @@ pub enum OtherFields<'a> {
     Execve(Vec<&'a str>),
     File(&'a str),
     Clone(ProcType),
+    Exit(i32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,7 +73,7 @@ where
         time_token
             .chars()
             .next()
-            .filter(|c| c.is_numeric())
+            .filter(|c| c.is_ascii_digit())
             .is_some()
     })?;
 
@@ -117,7 +118,7 @@ where
                 syscall_tok
                     .chars()
                     .next()
-                    .filter(|c| c.is_ascii_alphabetic())
+                    .filter(|&c| c.is_ascii_alphabetic() || c == '_')
                     .is_some()
             })?;
 
@@ -147,7 +148,7 @@ where
                 | "write" => {
                     if let Some(f) = syscall_split
                         .next()
-                        .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(0..s.len() - 2)))
+                        .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(..s.len() - 2)))
                     {
                         other = Some(OtherFields::File(f));
                     }
@@ -158,6 +159,16 @@ where
                         other = Some(OtherFields::Clone(ProcType::Thread));
                     } else {
                         other = Some(OtherFields::Clone(ProcType::Process));
+                    }
+                }
+                "exit" | "_exit" | "exit_group" => {
+                    if let Some(exit_code) = syscall_split
+                        .next()
+                        .map(|s| s.splitn(2, ')'))
+                        .and_then(|mut s| s.next())
+                        .and_then(|code| code.parse::<i32>().ok())
+                    {
+                        other = Some(OtherFields::Exit(exit_code));
                     }
                 }
                 _ => {}
@@ -454,6 +465,42 @@ mod tests {
                 rtn_cd: Some(56089),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_zero_exit_code() {
+        let input = r##"27367 11:34:28.799598 _exit(0)     = ?"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 27367,
+                time: "11:34:28.799598",
+                syscall: "_exit",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Started,
+                other: Some(OtherFields::Exit(0)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_nonzero_exit_code() {
+        let input = r##"18442 14:43:39.709211 exit_group(128 <unfinished ...>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 18442,
+                time: "14:43:39.709211",
+                syscall: "exit_group",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Started,
+                other: Some(OtherFields::Exit(128)),
             })
         );
     }

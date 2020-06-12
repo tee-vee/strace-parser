@@ -30,6 +30,7 @@ pub struct PidData<'a> {
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<RawExec<'a>>>,
+    pub exit_code: Option<i32>,
 }
 
 impl<'a> PidData<'a> {
@@ -43,6 +44,7 @@ impl<'a> PidData<'a> {
             open_events: Vec::new(),
             io_events: Vec::new(),
             execve: None,
+            exit_code: None,
         }
     }
 }
@@ -139,6 +141,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
             pid_entry.io_events.push(raw_data);
         }
+        "exit" | "_exit" | "exit_group" => {
+            if let Some(OtherFields::Exit(exit_code)) = raw_data.other {
+                pid_entry.exit_code = Some(exit_code);
+            }
+        }
         _ => {}
     }
 }
@@ -190,6 +197,10 @@ fn coalesce_pid_data<'a>(
             }
             (None, Some(temp_exec)) => pid_entry.execve = Some(temp_exec),
             _ => {}
+        }
+
+        if temp_pid_data.exit_code.is_some() {
+            pid_entry.exit_code = temp_pid_data.exit_code;
         }
     }
 }
@@ -282,5 +293,12 @@ mod tests {
 13656 12:00:00.000000 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...> "##;
         let pid_data_map = build_syscall_data(&input);
         assert_eq!("12:00:00.000000", pid_data_map[&13656].end_time,);
+    }
+
+    #[test]
+    fn pid_data_captures_exit_code() {
+        let input = r##"203   19:52:42.247489 exit_group(1)     = ?"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(Some(1), pid_data_map[&203].exit_code);
     }
 }

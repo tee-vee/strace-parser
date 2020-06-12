@@ -1,3 +1,4 @@
+use crate::exec::Execs;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
@@ -284,11 +285,17 @@ impl<'a> SessionSummary<'a> {
                 writeln!(stdout())?;
                 writeln!(stdout(), "{}", exec)?;
             } else if pid_summary.parent_pid.is_some()
-                || !pid_summary.threads.is_empty()
-                || !pid_summary.child_pids.is_empty()
+                || pid_summary.threads.is_empty()
+                || pid_summary.child_pids.is_empty()
+                || !pid_summary.exit_code.is_some()
             {
                 writeln!(stdout())?;
             }
+
+            if let Some(exit) = &pid_summary.exit_code {
+                writeln!(stdout(), "  Exit code: {}", exit)?;
+            }
+
             pid_summary.print_related_pids(PrintAmt::Some(PRINT_COUNT))?;
 
             writeln!(stdout(), "\n")?;
@@ -311,6 +318,9 @@ impl<'a> SessionSummary<'a> {
 
                 if let Some(exec) = &pid_summary.execve {
                     writeln!(stdout(), "{}", exec)?;
+                }
+                if let Some(exit) = &pid_summary.exit_code {
+                    writeln!(stdout(), "  Exit code: {}", exit)?;
                 }
                 pid_summary.print_related_pids(PrintAmt::All)?;
 
@@ -360,7 +370,13 @@ impl<'a> SessionSummary<'a> {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 if let Some(exec) = &pid_summary.execve {
                     for (cmd, time) in exec.iter() {
-                        writeln!(stdout(), "  {: <6}    {: <16}    {: <}", pid, time, cmd)?;
+                        writeln!(
+                            stdout(),
+                            "  {: <6}    {: <16}    {: <}",
+                            pid,
+                            time,
+                            Execs::replace_newlines(cmd, 35)
+                        )?;
                     }
                 }
             }
