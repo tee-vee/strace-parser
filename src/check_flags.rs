@@ -1,7 +1,7 @@
 use chrono::NaiveTime;
+use parser::time;
+use parser::Pid;
 use std::io::{prelude::*, stdout, Error};
-use strace_parse::time;
-use strace_parse::Pid;
 
 pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
     let mut tokens = line.split_whitespace();

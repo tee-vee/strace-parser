@@ -57,12 +57,12 @@ impl Execs {
         Execs { cmds, times }
     }
 
-    pub fn iter(&self) -> Zip<Iter<String>, Iter<String>> {
-        self.cmds.iter().zip(&self.times)
+    pub fn cmds(&self) -> Iter<String> {
+        self.cmds.iter()
     }
 
-    pub fn last_cmd(&self) -> &str {
-        self.cmds.last().map(|c| c.as_str()).unwrap_or_default()
+    pub fn iter(&self) -> Zip<Iter<String>, Iter<String>> {
+        self.cmds.iter().zip(&self.times)
     }
 
     pub fn replace_newlines(cmd: &str, ct: usize) -> String {

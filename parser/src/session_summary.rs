@@ -501,7 +501,7 @@ impl<'a> SessionSummary<'a> {
         Ok(())
     }
 
-    pub fn print_pid_tree(&self) -> Result<(), Error> {
+    pub fn print_pid_tree(&self, truncate: bool) -> Result<(), Error> {
         let pids: Vec<_> = self
             .to_sorted(SortBy::StartTime)
             .iter()
@@ -523,6 +523,7 @@ impl<'a> SessionSummary<'a> {
                 &self.pid_summaries,
                 &mut done,
                 &mut filled_cols,
+                truncate,
                 pid_tree::TreePrint::new(pid_tree::FanOut::All, 0, position),
             )?;
         }

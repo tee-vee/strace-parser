@@ -1,16 +1,16 @@
 use clap::ArgMatches;
 use memmap::MmapOptions;
+use parser::histogram;
+use parser::session_summary::SessionSummary;
+use parser::sort_by::{SortBy, SortEventsBy};
+use parser::syscall_data;
+use parser::syscall_stats;
+use parser::time;
+use parser::HashSet;
+use parser::Pid;
 use std::error::Error;
 use std::fs::File;
 use std::str;
-use strace_parse::histogram;
-use strace_parse::session_summary::SessionSummary;
-use strace_parse::sort_by::{SortBy, SortEventsBy};
-use strace_parse::syscall_data;
-use strace_parse::syscall_stats;
-use strace_parse::time;
-use strace_parse::HashSet;
-use strace_parse::Pid;
 
 mod check_flags;
 mod cli;
@@ -125,7 +125,10 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .unwrap_or(SortBy::ActiveTime);
             session_summary.print_summary(elapsed_time, count_to_print, sort_by)
         }
-        SubCmd::Tree => session_summary.print_pid_tree(),
+        SubCmd::Tree => {
+            let truncate = args.is_present("truncate");
+            session_summary.print_pid_tree(truncate)
+        }
     };
 
     Ok(())

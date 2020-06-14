@@ -1,5 +1,5 @@
 use clap::{App, AppSettings, Arg, SubCommand};
-use strace_parse::Pid;
+use parser::Pid;
 
 pub fn cli_args() -> App<'static, 'static> {
     App::new("strace parser")
@@ -228,7 +228,13 @@ pub fn cli_args() -> App<'static, 'static> {
                     ]),
             ))
         .subcommand(SubCommand::with_name("tree")
-            .about("pstree-style view of traced processes"))
+            .about("pstree-style view of traced processes")
+            .arg(
+                Arg::with_name("truncate")
+                    .short("t")
+                    .long("truncate")
+                    .help("Truncate commands to 50 characters")
+                    ))
 }
 
 fn validate_pid(p: String) -> Result<(), String> {

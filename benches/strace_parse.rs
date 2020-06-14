@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Benchmark, Criterion, Throughput};
+use parser::parser::parse_line;
+use parser::syscall_data::build_syscall_data;
 use rayon::prelude::*;
-use strace_parse::parser::parse_line;
-use strace_parse::syscall_data::build_syscall_data;
 
 fn build_strace_data(buffer: &str) {
     let _syscall_data = build_syscall_data(buffer);
