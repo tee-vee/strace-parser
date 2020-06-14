@@ -79,39 +79,6 @@ pub fn cli_args() -> App<'static, 'static> {
                     .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
         ))
-        .subcommand(SubCommand::with_name("quantize")
-            .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
-            .arg(
-                Arg::with_name("syscall")
-                    .help("Syscall to analyze")
-                    .required(true)
-                    .value_name("SYSCALL")
-                    .takes_value(true)
-                    .number_of_values(1),
-            )
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .help("PID(s) to analyze")
-                    .takes_value(true)
-                    .value_name("PIDS")
-                    .multiple(true)
-                    .validator(validate_pid),
-            )
-            .arg(
-                Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results")
-                    .requires("pid"),
-            ).arg(
-                Arg::with_name("threads")
-                    .short("t")
-                    .long("threads")
-                    .help("Include sibling threads of <PIDS> in results")
-                    .requires("pid"),
-            ))
         .subcommand(SubCommand::with_name("io")
             .about("Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write")
             .arg(
@@ -199,6 +166,39 @@ pub fn cli_args() -> App<'static, 'static> {
                     .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
             ))
+        .subcommand(SubCommand::with_name("quantize")
+            .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
+            .arg(
+                Arg::with_name("syscall")
+                    .help("Syscall to analyze")
+                    .required(true)
+                    .value_name("SYSCALL")
+                    .takes_value(true)
+                    .number_of_values(1),
+            )
+            .arg(
+                Arg::with_name("pid")
+                    .short("p")
+                    .long("pid")
+                    .help("PID(s) to analyze")
+                    .takes_value(true)
+                    .value_name("PIDS")
+                    .multiple(true)
+                    .validator(validate_pid),
+            )
+            .arg(
+                Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
+            ))
         .subcommand(SubCommand::with_name("summary")
             .about("Overview of PIDs in session")
             .arg(
@@ -227,6 +227,8 @@ pub fn cli_args() -> App<'static, 'static> {
                         "user_time",
                     ]),
             ))
+        .subcommand(SubCommand::with_name("tree")
+            .about("pstree-style view of traced processes"))
 }
 
 fn validate_pid(p: String) -> Result<(), String> {

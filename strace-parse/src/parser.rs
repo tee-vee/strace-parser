@@ -102,13 +102,17 @@ where
                     .is_some()
             })?;
 
-            if syscall == "clone" {
-                let flags = tokens.nth(2)?;
-                if flags.contains(CLONE_THREAD) {
-                    other = Some(OtherFields::Clone(ProcType::Thread))
-                } else {
-                    other = Some(OtherFields::Clone(ProcType::Process))
+            match syscall {
+                "clone" => {
+                    let flags = tokens.nth(2)?;
+                    if flags.contains(CLONE_THREAD) {
+                        other = Some(OtherFields::Clone(ProcType::Thread))
+                    } else {
+                        other = Some(OtherFields::Clone(ProcType::Process))
+                    }
                 }
+                "fork" | "vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
+                _ => {}
             }
         }
         CallStatus::Complete | CallStatus::Started => {
@@ -152,6 +156,9 @@ where
                     {
                         other = Some(OtherFields::File(f));
                     }
+                }
+                "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
+                    other = Some(OtherFields::Clone(ProcType::Process))
                 }
                 "clone" if matches!(call_status, CallStatus::Complete) => {
                     let flags = tokens.next()?;
@@ -463,6 +470,24 @@ mod tests {
                 duration: Some(0.004605),
                 error: None,
                 rtn_cd: Some(56089),
+                call_status: CallStatus::Resumed,
+                other: Some(OtherFields::Clone(ProcType::Process)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_fork_proc() {
+        let input = r##"2974  11:34:28.581144 <... vfork resumed> ) = 27367 <0.123110>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 2974,
+                time: "11:34:28.581144",
+                syscall: "vfork",
+                duration: Some(0.123110),
+                error: None,
+                rtn_cd: Some(27367),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
             })

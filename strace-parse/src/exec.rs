@@ -14,6 +14,10 @@ impl Execs {
         let mut cmds = Vec::new();
         let mut times = Vec::new();
 
+        if raw_execs.is_empty() {
+            panic!("empty exec");
+        }
+
         raw_execs.sort_by(|x, y| x.time.cmp(y.time));
 
         for raw_exec in raw_execs.iter() {
@@ -57,6 +61,10 @@ impl Execs {
         self.cmds.iter().zip(&self.times)
     }
 
+    pub fn last_cmd(&self) -> &str {
+        self.cmds.last().map(|c| c.as_str()).unwrap_or_default()
+    }
+
     pub fn replace_newlines(cmd: &str, ct: usize) -> String {
         let mut whitespace = String::from("\n");
         whitespace.push_str(&" ".repeat(ct));
@@ -69,8 +77,9 @@ impl Execs {
             .trim_start_matches(|c| c == '[')
             .trim_end_matches(|c| c == ',' || c == ']');
 
-        // Only trim quotes if arg is fully quoted, other it's part of a quoted command
-        if initial_trim.starts_with('"') && initial_trim.ends_with('"') {
+        // Only trim quotes if arg is fully quoted and not a standalone quote
+        // otherwise it's part of a quoted command, e.g. 'sh -c "ls -la"'
+        if initial_trim.starts_with('"') && initial_trim.ends_with('"') && initial_trim != r#"""# {
             initial_trim.trim_start_matches('"').trim_end_matches('"')
         } else {
             initial_trim

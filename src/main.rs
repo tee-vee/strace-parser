@@ -25,9 +25,10 @@ enum SubCmd {
     Exec,
     Files,
     Io,
-    Quantize,
     List,
+    Quantize,
     Summary,
+    Tree,
 }
 
 fn main() {
@@ -124,6 +125,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .unwrap_or(SortBy::ActiveTime);
             session_summary.print_summary(elapsed_time, count_to_print, sort_by)
         }
+        SubCmd::Tree => session_summary.print_pid_tree(),
     };
 
     Ok(())
@@ -138,6 +140,7 @@ fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<
         ("quantize", Some(args)) => (SubCmd::Quantize, args),
         ("list-pids", Some(args)) => (SubCmd::List, args),
         ("summary", Some(args)) => (SubCmd::Summary, args),
+        ("tree", Some(args)) => (SubCmd::Tree, args),
         _ => unreachable!(),
     }
 }

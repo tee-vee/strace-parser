@@ -2,7 +2,7 @@ use crate::exec::Execs;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{file_data, file_data::SortFilesBy, io_data};
+use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, Pid, PidSummary, SortBy, SortEventsBy};
 use chrono::Duration;
 use petgraph::prelude::*;
@@ -25,12 +25,7 @@ impl<'a> SessionSummary<'a> {
         session_stats: &HashMap<Pid, Vec<SyscallStats<'a>>>,
         pid_data: &'a HashMap<Pid, PidData<'a>>,
     ) -> SessionSummary<'a> {
-        let mut summary = SessionSummary::default(); //{
-                                                     //    pid_summaries: HashMap::default(),
-                                                     //    all_time: 0.0,
-                                                     //    all_active_time: 0.0,
-                                                     //    all_user_time: 0.0,
-                                                     //};
+        let mut summary = SessionSummary::default();
 
         for (pid, syscall_stats) in session_stats {
             summary.pid_summaries.insert(
@@ -95,6 +90,9 @@ impl<'a> SessionSummary<'a> {
             }
             SortBy::Pid => {
                 sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
+            }
+            SortBy::StartTime => {
+                sorted_summaries.par_sort_by(|(_, x), (_, y)| (x.start_time).cmp(&y.start_time));
             }
             SortBy::SyscallCount => {
                 sorted_summaries
@@ -496,9 +494,37 @@ impl<'a> SessionSummary<'a> {
         Ok(())
     }
 
+    pub fn print_pid_tree(&self) -> Result<(), Error> {
+        let pids: Vec<_> = self
+            .to_sorted(SortBy::StartTime)
+            .iter()
+            .map(|(p, _)| p)
+            .cloned()
+            .collect();
+        let mut done = Vec::new();
+        let mut filled_cols = BTreeSet::new();
+
+        let mut pid_iter = pids.iter().peekable();
+        while let Some(&pid) = pid_iter.next() {
+            let position = match pid_iter.peek().is_some() {
+                true => pid_tree::PidPosition::NotLast,
+                false => pid_tree::PidPosition::Last,
+            };
+
+            pid_tree::print_tree(
+                pid,
+                &self.pid_summaries,
+                &mut done,
+                &mut filled_cols,
+                pid_tree::TreePrint::new(pid_tree::FanOut::All, 0, position),
+            )?;
+        }
+
+        Ok(())
+    }
+
     pub fn pids(&self) -> Vec<Pid> {
-        let pids: Vec<_> = self.pid_summaries.keys().cloned().collect();
-        pids
+        self.pid_summaries.keys().cloned().collect()
     }
 
     fn format_duration(millis: i64) -> String {
