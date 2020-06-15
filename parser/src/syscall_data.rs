@@ -1,7 +1,7 @@
 use crate::parser;
 use crate::parser::{OtherFields, ProcType, RawData};
-use crate::HashMap;
 use crate::Pid;
+use crate::{HashMap, HashSet};
 use rayon::prelude::*;
 use std::convert::TryFrom;
 
@@ -25,7 +25,8 @@ pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub start_time: &'a str,
     pub end_time: &'a str,
-    pub threads: Vec<Pid>,
+    pub pvt_futex: HashSet<&'a str>,
+    pub threads: HashSet<Pid>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
@@ -39,7 +40,8 @@ impl<'a> PidData<'a> {
             syscall_data: HashMap::default(),
             start_time: "zzzzz", // greater than any valid time str
             end_time: "00000",   // less than any valid time str
-            threads: Vec::new(),
+            pvt_futex: HashSet::new(),
+            threads: HashSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             io_events: Vec::new(),
@@ -122,7 +124,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
                 pid_entry.child_pids.push(child_pid as Pid)
             }
             (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
-                pid_entry.threads.push(child_pid as Pid)
+                pid_entry.threads.insert(child_pid as Pid);
             }
             _ => {}
         },
@@ -133,6 +135,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
                 } else {
                     pid_entry.execve = Some(vec![e]);
                 }
+            }
+        }
+        "futex" => {
+            if let Some(OtherFields::Futex(addr)) = raw_data.other {
+                pid_entry.pvt_futex.insert(addr);
             }
         }
         "open" | "openat" => {
@@ -180,6 +187,8 @@ fn coalesce_pid_data<'a>(
         if temp_pid_data.end_time > pid_entry.end_time {
             pid_entry.end_time = temp_pid_data.end_time;
         }
+
+        pid_entry.pvt_futex.extend(temp_pid_data.pvt_futex);
 
         pid_entry.threads.extend(temp_pid_data.threads);
 
@@ -300,5 +309,19 @@ mod tests {
         let input = r##"203   19:52:42.247489 exit_group(1)     = ?"##;
         let pid_data_map = build_syscall_data(&input);
         assert_eq!(Some(1), pid_data_map[&203].exit_code);
+    }
+
+    #[test]
+    fn pid_data_captures_futex_addrs() {
+        let input = r##"11616 11:34:25.556786 futex(0x7ffa5001fa54, FUTEX_WAIT_PRIVATE, 29, NULL <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(
+            &["0x7ffa5001fa54"],
+            &pid_data_map[&11616]
+                .pvt_futex
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()[..1]
+        );
     }
 }

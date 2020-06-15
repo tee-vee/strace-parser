@@ -14,10 +14,11 @@ pub struct RawData<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum OtherFields<'a> {
-    Execve(Vec<&'a str>),
-    File(&'a str),
     Clone(ProcType),
+    Execve(Vec<&'a str>),
     Exit(i32),
+    File(&'a str),
+    Futex(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +147,17 @@ where
                             .for_each(|arg| v.push(arg));
 
                         other = Some(OtherFields::Execve(v));
+                    }
+                }
+                "futex" => {
+                    if let Some(addr) = syscall_split.next().and_then(|a| a.get(..a.len() - 1)) {
+                        if tokens
+                            .next()
+                            .map(|t| t.contains("PRIVATE"))
+                            .unwrap_or_default()
+                        {
+                            other = Some(OtherFields::Futex(addr))
+                        }
                     }
                 }
                 "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
@@ -400,6 +412,80 @@ mod tests {
                     "[\"sleep\",",
                     "\"1\"],",
                 ])),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_private_futex_complete() {
+        let input =
+            r##"27820 20:26:33.949452 futex(0x535c890, FUTEX_WAKE_PRIVATE, 1) = 0 <0.000087>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 27820,
+                time: "20:26:33.949452",
+                syscall: "futex",
+                duration: Some(0.000087),
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Complete,
+                other: Some(OtherFields::Futex("0x535c890")),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_private_futex_started() {
+        let input = r##"11638 11:34:25.556415 futex(0x7ffa50080ff4, FUTEX_WAIT_PRIVATE, 27, NULL <unfinished ...>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 11638,
+                time: "11:34:25.556415",
+                syscall: "futex",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Started,
+                other: Some(OtherFields::Futex("0x7ffa50080ff4"))
+            })
+        );
+    }
+
+    #[test]
+    fn parser_skips_non_private_futex_complete() {
+        let input = r##"2965  11:34:25.561897 futex(0x38e1c80, FUTEX_WAKE, 1) = 0 <0.000025>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 2965,
+                time: "11:34:25.561897",
+                syscall: "futex",
+                duration: Some(0.000025),
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Complete,
+                other: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_skips_non_private_futex_started() {
+        let input =
+            r##"23740 11:34:25.556284 futex(0xc420061548, FUTEX_WAIT, 0, NULL <unfinished ...>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 23740,
+                time: "11:34:25.556284",
+                syscall: "futex",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Started,
+                other: None,
             })
         );
     }

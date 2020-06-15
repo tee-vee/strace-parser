@@ -3,7 +3,7 @@ use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
-use crate::{HashMap, Pid, PidSummary, SortBy, SortEventsBy};
+use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -147,6 +147,51 @@ impl<'a> SessionSummary<'a> {
                 pid_summary.threads.extend(threads);
             }
         }
+
+        let futex_map = self.calc_futex_threads();
+        for (pid, threads) in futex_map.into_iter() {
+            if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
+                pid_summary.threads.extend(threads);
+            }
+        }
+    }
+
+    fn calc_futex_threads(&self) -> HashMap<Pid, HashSet<Pid>> {
+        let mut addr_map = HashMap::new();
+        for (&pid, pid_summary) in &self.pid_summaries {
+            for addr in &pid_summary.pvt_futex {
+                let addr_entry = addr_map.entry(addr).or_insert_with(HashSet::new);
+                addr_entry.insert(pid);
+            }
+        }
+
+        let mut addr_graph: UnGraphMap<&str, i8> = UnGraphMap::new();
+        for (&&addr, pids) in &addr_map {
+            for (inr_addr, inr_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
+                if !pids.is_disjoint(inr_pids) {
+                    addr_graph.add_edge(addr, inr_addr, 1);
+                }
+            }
+        }
+
+
+        let mut thread_map: HashMap<Pid, HashSet<Pid>> = HashMap::new();
+        for (addr, pids) in &addr_map {
+            let mut dfs = Dfs::new(&addr_graph, addr);
+
+            while let Some(relative) = dfs.next(&addr_graph) {
+                for &pid in pids.iter() {
+                    let entry = thread_map.entry(pid).or_insert_with(HashSet::new);
+                    entry.extend(pids.iter().filter(|&&p| p != pid));
+
+                    if let Some(more_pids) = addr_map.get(&relative) {
+                        entry.extend(more_pids.iter().filter(|&&p| p != pid));
+                    }
+                }
+            }
+        }
+
+        thread_map
     }
 
     pub fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
@@ -285,7 +330,7 @@ impl<'a> SessionSummary<'a> {
             } else if pid_summary.parent_pid.is_some()
                 || pid_summary.threads.is_empty()
                 || pid_summary.child_pids.is_empty()
-                || !pid_summary.exit_code.is_some()
+                || pid_summary.exit_code.is_none()
             {
                 writeln!(stdout())?;
             }
@@ -558,7 +603,7 @@ mod tests {
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -571,7 +616,7 @@ mod tests {
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -584,7 +629,7 @@ mod tests {
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -596,7 +641,7 @@ mod tests {
         let input = r##"566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:50.000000 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:51.000000 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
-566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -606,7 +651,7 @@ mod tests {
     #[test]
     fn pid_summary_total_time_syscall_starts_pre_strace_correct() {
         let input = r##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <100.000000>
-566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##.to_string();
+566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -620,7 +665,7 @@ mod tests {
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>
-566   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000000>"##.to_string();
+566   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000000>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -632,7 +677,7 @@ mod tests {
         let input = r##"1875  1546841132.010874 clone(child_stack=0x7f3f8dffef70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8dfff9d0, tls=0x7f3f8dfff700, child_tidptr=0x7f3f8dfff9d0) = 20222 <0.000037>
 1875  1546841132.011524 clone(child_stack=0x7f3f8d5fdf70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8d5fe9d0, tls=0x7f3f8d5fe700, child_tidptr=0x7f3f8d5fe9d0) = 20223 <0.000031>
 20222 1546841132.017849 set_robust_list(0x7f3f8dfff9e0, 24) = 0 <0.000009>
-20223 1546841132.016568 set_robust_list(0x7f3f8d5fe9e0, 24) = 0 <0.000010>"##.to_string();
+20223 1546841132.016568 set_robust_list(0x7f3f8d5fe9e0, 24) = 0 <0.000010>"##;
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
@@ -642,5 +687,36 @@ mod tests {
         assert!(summary.pid_summaries[&20222].threads.contains(&20223));
         assert!(summary.pid_summaries[&20223].threads.contains(&1875));
         assert!(summary.pid_summaries[&20223].threads.contains(&20222));
+    }
+
+    #[test]
+    fn pid_summary_futex_threads_traced() {
+        let input = r##"17038 11:36:25.284840 futex(0x7ff622820044, FUTEX_WAIT_PRIVATE, 30825, NULL <unfinished ...>
+24685 11:36:25.736368 futex(0x7ff622820044, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820040, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1} <unfinished ...>
+17041 11:36:27.818916 futex(0x7ff62282007c, FUTEX_WAIT_PRIVATE, 9057, NULL <unfinished ...>
+17041 11:36:27.821480 futex(0x7ff622820010, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
+17043 11:36:31.261304 futex(0x7ff62282007c, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820078, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1}) = 1 <0.000012>
+24518 11:36:31.463766 futex(0x7ff622820044, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820040, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1}) = 1 <0.000146>
+24518 11:36:31.462456 futex(0x7ff622820010, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
+        let mut all_pids = BTreeSet::new();
+        all_pids.extend(&[17038, 17041, 17043, 24518, 24685]);
+
+        let union: BTreeSet<_> = summary.pid_summaries[&17038].threads.intersection(&all_pids).collect();
+        assert_eq!(union, [17041, 17043, 24518, 24685].iter().collect());
+
+        let union: BTreeSet<_> = summary.pid_summaries[&17041].threads.intersection(&all_pids).collect();
+        assert_eq!(union, [17038, 17043, 24518, 24685].iter().collect());
+
+        let union: BTreeSet<_> = summary.pid_summaries[&17043].threads.intersection(&all_pids).collect();
+        assert_eq!(union, [17038, 17041, 24518, 24685].iter().collect());
+
+        let union: BTreeSet<_> = summary.pid_summaries[&24518].threads.intersection(&all_pids).collect();
+        assert_eq!(union, [17038, 17041, 17043, 24685].iter().collect());
+
+        let union: BTreeSet<_> = summary.pid_summaries[&24685].threads.intersection(&all_pids).collect();
+        assert_eq!(union, [17038, 17041, 17043, 24518].iter().collect());
     }
 }

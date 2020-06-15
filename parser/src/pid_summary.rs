@@ -7,6 +7,7 @@ use crate::Pid;
 use chrono::NaiveTime;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::{prelude::*, stdout, Error};
 
@@ -40,9 +41,10 @@ pub struct PidSummary<'a> {
     pub start_time: &'a str,
     pub end_time: &'a str,
     pub syscall_stats: Vec<SyscallStats<'a>>,
+    pub pvt_futex: HashSet<&'a str>,
     pub parent_pid: Option<Pid>,
-    pub threads: Vec<Pid>,
-    pub child_pids: Vec<Pid>,
+    pub threads: BTreeSet<Pid>,
+    pub child_pids: BTreeSet<Pid>,
     pub execve: Option<Execs>,
     pub exit_code: Option<i32>,
 }
@@ -125,9 +127,10 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             start_time,
             end_time,
             syscall_stats: syscall_stats.to_vec(),
+            pvt_futex: pid_data.pvt_futex.clone(),
             parent_pid: None, // parent is calculated later on
-            threads: pid_data.threads.clone(),
-            child_pids: pid_data.child_pids.clone(),
+            threads: pid_data.threads.iter().cloned().collect(),
+            child_pids: pid_data.child_pids.iter().cloned().collect(),
             execve,
             exit_code: pid_data.exit_code,
         }
@@ -140,14 +143,20 @@ impl<'a> PidSummary<'a> {
             writeln!(stdout(), "  Parent PID:  {}", p)?;
         }
 
-        PidSummary::print_pids(&self.threads, "Threads", print_amt)?;
-        PidSummary::print_pids(&self.child_pids, "Child PIDs", print_amt)?;
+        PidSummary::print_pids(self.threads.iter().cloned(), "Threads", print_amt)?;
+        PidSummary::print_pids(self.child_pids.iter().cloned(), "Child PIDs", print_amt)?;
 
         Ok(())
     }
 
-    fn print_pids(pids: &[Pid], name: &str, print_amt: PrintAmt) -> Result<(), Error> {
-        if !pids.is_empty() {
+    fn print_pids(
+        pids: impl ExactSizeIterator<Item = Pid>,
+        name: &str,
+        print_amt: PrintAmt,
+    ) -> Result<(), Error> {
+        let len = pids.len();
+
+        if len > 0 {
             let print_ct = match print_amt {
                 PrintAmt::All => pids.len(),
                 PrintAmt::Some(c) => c,
@@ -155,7 +164,7 @@ impl<'a> PidSummary<'a> {
 
             write!(stdout(), "  {}:  ", name)?;
             if pids.len() > print_ct {
-                for (i, p) in pids.iter().enumerate().take(print_ct) {
+                for (i, p) in pids.enumerate().take(print_ct) {
                     if i % 10 == 0 && i != 0 {
                         write!(stdout(), "\n               ")?;
                     }
@@ -165,9 +174,9 @@ impl<'a> PidSummary<'a> {
                         write!(stdout(), "{} ", p)?;
                     }
                 }
-                writeln!(stdout(), "and {} more...", pids.len() - print_ct)?;
+                writeln!(stdout(), "and {} more...", len - print_ct)?;
             } else {
-                let mut pid_iter = pids.iter().enumerate().peekable();
+                let mut pid_iter = pids.enumerate().peekable();
                 while let Some((i, n)) = pid_iter.next() {
                     if i % 10 == 0 && i != 0 {
                         write!(stdout(), "\n               ")?;
