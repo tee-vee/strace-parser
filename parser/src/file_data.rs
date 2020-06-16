@@ -37,7 +37,7 @@ impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
         FileData {
             pid: raw_data.pid,
             time: raw_data.time,
-            file: raw_data.file.unwrap_or_default(),
+            file: raw_data.file().unwrap_or_default(),
             error: raw_data.error,
             duration: raw_data.duration.map_or(0.0, |dur| dur * 1000.0),
         }
@@ -96,7 +96,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
                 complete_entries.push(FileData::new(
                     entry.pid,
                     entry.time,
-                    entry.file,
+                    entry.file(),
                     entry.error,
                     entry.duration,
                 ));
@@ -106,7 +106,7 @@ fn coalesce_file_data<'a>(file_data: &[RawData<'a>]) -> Vec<FileData<'a>> {
                     complete_entries.push(FileData::new(
                         entry.pid,
                         entry.time,
-                        entry.file,
+                        entry.file(),
                         next_entry.error,
                         next_entry.duration,
                     ));

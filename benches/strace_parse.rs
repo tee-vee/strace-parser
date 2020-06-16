@@ -1,9 +1,7 @@
-#![feature(split_ascii_whitespace)]
-
 use criterion::{criterion_group, criterion_main, Benchmark, Criterion, Throughput};
+use parser::parser::parse_line;
+use parser::syscall_data::build_syscall_data;
 use rayon::prelude::*;
-use strace_parse::parser::parse_line;
-use strace_parse::syscall_data::build_syscall_data;
 
 fn build_strace_data(buffer: &str) {
     let _syscall_data = build_syscall_data(buffer);
@@ -26,7 +24,7 @@ fn data_benchmark(c: &mut Criterion) {
         Benchmark::new("Throughput -- Multi-Threaded", |b| {
             b.iter(|| build_strace_data(DATA))
         })
-        .throughput(Throughput::Bytes(DATA.len() as u32)),
+        .throughput(Throughput::Bytes(DATA.len() as u64)),
     );
 }
 
@@ -36,7 +34,7 @@ fn throughput_bench(c: &mut Criterion) {
         Benchmark::new("Throughput -- Single-Threaded", |b| {
             b.iter(|| parse_strace_st(DATA))
         })
-        .throughput(Throughput::Bytes(DATA.len() as u32)),
+        .throughput(Throughput::Bytes(DATA.len() as u64)),
     );
 
     c.bench(
@@ -44,7 +42,7 @@ fn throughput_bench(c: &mut Criterion) {
         Benchmark::new("Throughput -- Multi-Threaded", |b| {
             b.iter(|| parse_strace_mt(DATA))
         })
-        .throughput(Throughput::Bytes(DATA.len() as u32)),
+        .throughput(Throughput::Bytes(DATA.len() as u64)),
     );
 }
 

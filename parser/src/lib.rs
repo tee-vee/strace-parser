@@ -9,6 +9,7 @@ pub mod histogram;
 pub mod io_data;
 pub mod parser;
 pub mod pid_summary;
+pub mod pid_tree;
 pub mod session_summary;
 pub mod sort_by;
 pub mod syscall_data;

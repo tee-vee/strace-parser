@@ -1,5 +1,5 @@
 use clap::{App, AppSettings, Arg, SubCommand};
-use strace_parse::Pid;
+use parser::Pid;
 
 pub fn cli_args() -> App<'static, 'static> {
     App::new("strace parser")
@@ -35,6 +35,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .long("related")
                     .help("Include parent and child PIDs of <PIDS> in results")
                     .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("files")
             .about("List files opened")
@@ -66,34 +72,13 @@ pub fn cli_args() -> App<'static, 'static> {
                         "pid",
                         "time",
                     ]),
-            ))
-        .subcommand(SubCommand::with_name("quantize")
-            .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
-            .arg(
-                Arg::with_name("syscall")
-                    .help("Syscall to analyze")
-                    .required(true)
-                    .value_name("SYSCALL")
-                    .takes_value(true)
-                    .number_of_values(1),
-            )
-            .arg(
-                Arg::with_name("pid")
-                    .short("p")
-                    .long("pid")
-                    .help("PID(s) to analyze")
-                    .takes_value(true)
-                    .value_name("PIDS")
-                    .multiple(true)
-                    .validator(validate_pid),
-            )
-            .arg(
-                Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results")
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
-            ))
+        ))
         .subcommand(SubCommand::with_name("io")
             .about("Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write")
             .arg(
@@ -105,8 +90,12 @@ pub fn cli_args() -> App<'static, 'static> {
                     .value_name("PIDS")
                     .multiple(true)
                     .validator(validate_pid),
-            )
-            .arg(
+            ).arg( Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                  .requires("pid"),
+            ).arg(
                 Arg::with_name("sort_by")
                     .short("s")
                     .long("sort")
@@ -118,11 +107,11 @@ pub fn cli_args() -> App<'static, 'static> {
                         "pid",
                         "time",
                     ]),
-            )
-            .arg( Arg::with_name("related")
-                    .short("r")
-                    .long("related")
-                    .help("Include parent and child PIDs of <PIDS> in results")
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("list-pids")
@@ -170,6 +159,45 @@ pub fn cli_args() -> App<'static, 'static> {
                     .long("related")
                     .help("Include parent and child PIDs of <PIDS> in results")
                     .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
+            ))
+        .subcommand(SubCommand::with_name("quantize")
+            .about("Prints a log\u{2082} scale histogram of the quantized execution times in \u{03BC}secs for <SYSCALL>")
+            .arg(
+                Arg::with_name("syscall")
+                    .help("Syscall to analyze")
+                    .required(true)
+                    .value_name("SYSCALL")
+                    .takes_value(true)
+                    .number_of_values(1),
+            )
+            .arg(
+                Arg::with_name("pid")
+                    .short("p")
+                    .long("pid")
+                    .help("PID(s) to analyze")
+                    .takes_value(true)
+                    .value_name("PIDS")
+                    .multiple(true)
+                    .validator(validate_pid),
+            )
+            .arg(
+                Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
             ))
         .subcommand(SubCommand::with_name("summary")
             .about("Overview of PIDs in session")
@@ -199,6 +227,14 @@ pub fn cli_args() -> App<'static, 'static> {
                         "user_time",
                     ]),
             ))
+        .subcommand(SubCommand::with_name("tree")
+            .about("pstree-style view of traced processes")
+            .arg(
+                Arg::with_name("truncate")
+                    .short("t")
+                    .long("truncate")
+                    .help("Truncate commands to 50 characters")
+                    ))
 }
 
 fn validate_pid(p: String) -> Result<(), String> {
