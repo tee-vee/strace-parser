@@ -1,4 +1,4 @@
-**Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/tags)**
+**Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/-/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/-/tags)**
 
 A tool to analyze raw `strace` data.
 
@@ -25,6 +25,11 @@ required data to be captured. Including `-yyy` will provide file details in the 
 I recommend using `strace -fttTyyy -s 1024` as default flags.
 
 ## Building from Source
+
+**NOTE**: Because `strace` may slow down the target system by up to 10x,
+it is not recommended for use in a production environment
+except as a last resort. See [this article](http://www.brendangregg.com/blog/2014-05-11/strace-wow-much-syscall.html)
+for more information on the performance impacts of `strace`.
 
 You'll need the Rust compiler 1.42 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
