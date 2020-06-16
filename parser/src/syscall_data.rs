@@ -1,8 +1,9 @@
 use crate::parser;
-use crate::parser::RawData;
-use crate::HashMap;
+use crate::parser::{OtherFields, ProcType, RawData};
 use crate::Pid;
+use crate::{HashMap, HashSet};
 use rayon::prelude::*;
+use std::convert::TryFrom;
 
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
@@ -24,10 +25,13 @@ pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
     pub start_time: &'a str,
     pub end_time: &'a str,
+    pub pvt_futex: HashSet<&'a str>,
+    pub threads: HashSet<Pid>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<RawExec<'a>>>,
+    pub exit_code: Option<i32>,
 }
 
 impl<'a> PidData<'a> {
@@ -36,10 +40,13 @@ impl<'a> PidData<'a> {
             syscall_data: HashMap::default(),
             start_time: "zzzzz", // greater than any valid time str
             end_time: "00000",   // less than any valid time str
+            pvt_futex: HashSet::new(),
+            threads: HashSet::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             io_events: Vec::new(),
             execve: None,
+            exit_code: None,
         }
     }
 }
@@ -53,6 +60,19 @@ pub struct RawExec<'a> {
 impl<'a> RawExec<'a> {
     pub fn new(exec: Vec<&'a str>, time: &'a str) -> RawExec<'a> {
         RawExec { exec, time }
+    }
+}
+
+impl<'a> TryFrom<RawData<'a>> for RawExec<'a> {
+    type Error = &'static str;
+
+    fn try_from(data: RawData<'a>) -> Result<Self, Self::Error> {
+        let t = data.time;
+        if let Some(OtherFields::Execve(v)) = data.other {
+            Ok(RawExec::new(v, t))
+        } else {
+            Err("No exec")
+        }
     }
 }
 
@@ -99,18 +119,27 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
     }
 
     match raw_data.syscall {
-        "clone" | "fork" | "vfork" => {
-            if let Some(child_pid) = raw_data.rtn_cd {
-                pid_entry.child_pids.push(child_pid as Pid);
+        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, raw_data.other) {
+            (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
+                pid_entry.child_pids.push(child_pid as Pid)
+            }
+            (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
+                pid_entry.threads.insert(child_pid as Pid);
+            }
+            _ => {}
+        },
+        "execve" => {
+            if let Ok(e) = RawExec::try_from(raw_data) {
+                if let Some(execs) = &mut pid_entry.execve {
+                    execs.push(e);
+                } else {
+                    pid_entry.execve = Some(vec![e]);
+                }
             }
         }
-        "execve" => {
-            if let Some(e) = raw_data.execve {
-                if let Some(execs) = &mut pid_entry.execve {
-                    execs.push(RawExec::new(e, raw_data.time));
-                } else {
-                    pid_entry.execve = Some(vec![RawExec::new(e, raw_data.time)]);
-                }
+        "futex" => {
+            if let Some(OtherFields::Futex(addr)) = raw_data.other {
+                pid_entry.pvt_futex.insert(addr);
             }
         }
         "open" | "openat" => {
@@ -118,6 +147,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         }
         "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
             pid_entry.io_events.push(raw_data);
+        }
+        "exit" | "_exit" | "exit_group" => {
+            if let Some(OtherFields::Exit(exit_code)) = raw_data.other {
+                pid_entry.exit_code = Some(exit_code);
+            }
         }
         _ => {}
     }
@@ -154,6 +188,10 @@ fn coalesce_pid_data<'a>(
             pid_entry.end_time = temp_pid_data.end_time;
         }
 
+        pid_entry.pvt_futex.extend(temp_pid_data.pvt_futex);
+
+        pid_entry.threads.extend(temp_pid_data.threads);
+
         pid_entry.child_pids.extend(temp_pid_data.child_pids);
 
         pid_entry.open_events.extend(temp_pid_data.open_events);
@@ -168,6 +206,10 @@ fn coalesce_pid_data<'a>(
             }
             (None, Some(temp_exec)) => pid_entry.execve = Some(temp_exec),
             _ => {}
+        }
+
+        if temp_pid_data.exit_code.is_some() {
+            pid_entry.exit_code = temp_pid_data.exit_code;
         }
     }
 }
@@ -201,6 +243,13 @@ mod tests {
                 .collect::<Vec<(&str, i32)>>(),
             vec![("ENOTTY", 2)]
         );
+    }
+
+    #[test]
+    fn syscall_data_captures_thread() {
+        let input = r##"28898 21:16:52.387464 clone(child_stack=0x7f03e0beeff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f03e0bef9d0, tls=0x7f03e0bef700, child_tidptr=0x7f03e0bef9d0) = 28899 <0.000081>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        assert!(pid_data_map[&28898].threads.contains(&28899));
     }
 
     #[test]
@@ -253,5 +302,26 @@ mod tests {
 13656 12:00:00.000000 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...> "##;
         let pid_data_map = build_syscall_data(&input);
         assert_eq!("12:00:00.000000", pid_data_map[&13656].end_time,);
+    }
+
+    #[test]
+    fn pid_data_captures_exit_code() {
+        let input = r##"203   19:52:42.247489 exit_group(1)     = ?"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(Some(1), pid_data_map[&203].exit_code);
+    }
+
+    #[test]
+    fn pid_data_captures_futex_addrs() {
+        let input = r##"11616 11:34:25.556786 futex(0x7ffa5001fa54, FUTEX_WAIT_PRIVATE, 29, NULL <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(
+            &["0x7ffa5001fa54"],
+            &pid_data_map[&11616]
+                .pvt_futex
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()[..1]
+        );
     }
 }

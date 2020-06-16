@@ -1,16 +1,16 @@
 use clap::ArgMatches;
 use memmap::MmapOptions;
+use parser::histogram;
+use parser::session_summary::SessionSummary;
+use parser::sort_by::{SortBy, SortEventsBy};
+use parser::syscall_data;
+use parser::syscall_stats;
+use parser::time;
+use parser::HashSet;
+use parser::Pid;
 use std::error::Error;
 use std::fs::File;
 use std::str;
-use strace_parse::histogram;
-use strace_parse::session_summary::SessionSummary;
-use strace_parse::sort_by::{SortBy, SortEventsBy};
-use strace_parse::syscall_data;
-use strace_parse::syscall_stats;
-use strace_parse::time;
-use strace_parse::HashSet;
-use strace_parse::Pid;
 
 mod check_flags;
 mod cli;
@@ -25,9 +25,10 @@ enum SubCmd {
     Exec,
     Files,
     Io,
-    Quantize,
     List,
+    Quantize,
     Summary,
+    Tree,
 }
 
 fn main() {
@@ -124,6 +125,10 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .unwrap_or(SortBy::ActiveTime);
             session_summary.print_summary(elapsed_time, count_to_print, sort_by)
         }
+        SubCmd::Tree => {
+            let truncate = args.is_present("truncate");
+            session_summary.print_pid_tree(truncate)
+        }
     };
 
     Ok(())
@@ -138,6 +143,7 @@ fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<
         ("quantize", Some(args)) => (SubCmd::Quantize, args),
         ("list-pids", Some(args)) => (SubCmd::List, args),
         ("summary", Some(args)) => (SubCmd::Summary, args),
+        ("tree", Some(args)) => (SubCmd::Tree, args),
         _ => unreachable!(),
     }
 }
@@ -159,6 +165,9 @@ fn select_pids(
         if args.is_present("related") {
             let related_pids = session_summary.related_pids(&checked_pids);
             Ok(related_pids)
+        } else if args.is_present("threads") {
+            let threads = session_summary.threads(&checked_pids);
+            Ok(threads)
         } else {
             Ok(checked_pids)
         }
