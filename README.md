@@ -1,8 +1,8 @@
 **Binaries can be downloaded via [Releases](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/releases), or [Repository -> Tags](https://gitlab.com/gitlab-com/support/toolbox/strace-parser/tags)**
 
-A small tool to analyze raw `strace` data.
+A tool to analyze raw `strace` data.
 
-Similar to output provided by the `-c` flag, but with more details and capable of handling multiple PIDs.
+Similar to output provided by the `-c` flag, but with more detail and capable of handling multiple PIDs.
 
 It can generate the following metrics:
    * A summary of the top processes, including total syscalls and time spent
@@ -12,16 +12,21 @@ It can generate the following metrics:
    * A list of all file opened in session
    * A list of all read/write calls made in session
    * A histogram showing the quantized distribution of execution times for a given syscall
+   * A `pstree` style graph of traced processes
+
+The parser will attempt to find all sibling threads of traced processes. For a command executed with or after
+the start of the trace this will always be accurate. On existing processes some threads may not be found.
+The parser checks for `futex` calls with a `*_PRIVATE` flag that share an `uaddr`; if these do not occur the
+parser cannot relate the processes.
 
 **NOTE**: `strace` must be run with the at least the `-tt -T -f` flags for
-required data to be captured. Including `-yyy` will provide file details in the
-`io` subcommand.
+required data to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
-I recommend using `strace -fttTyyy -s 1024` as default flags to use.
+I recommend using `strace -fttTyyy -s 1024` as default flags.
 
-## Building
+## Building from Source
 
-You'll need the Rust compiler 1.34 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
+You'll need the Rust compiler 1.42 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
 Build with `cargo build --release`, the binary will be located at `target/release/strace-parser`.
 
@@ -40,8 +45,9 @@ Build with `cargo build --release`, the binary will be located at `target/releas
   * `io` - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
   * `list-pids` - List of PIDs and their syscall stats
   * `pid` - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
-* `quantize` - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
+  * `quantize` - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
   * `summary` - Overview of PIDs in session
+  * `tree` - pstree-style view of traced processes
 
 Note that all subcommands can be arbritrarily abbreviated.
 
@@ -131,7 +137,7 @@ PID 17021
 
 #### pid
 
-Details of PID(s) including syscalls stats, processes executed, and slowest `open` and `openat` calls
+Details of PID(s) including syscalls stats, processes executed, sibling threads, exit code, and slowest `open` and `openat` calls
 
 `strace-parser <INPUT> pid [FLAGS] <PIDS>...`
 
@@ -140,27 +146,38 @@ Details of PID(s) including syscalls stats, processes executed, and slowest `ope
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
 
 ```
 $ strace-parser trace.txt pid 16747
-PID 16747
-408 syscalls, active time: 12.278ms, total time: 11375.831ms
+PID 28912
 
-                 	        	     total	       max	       avg	       min
-  syscall        	   count	      (ms)	      (ms)	      (ms)	      (ms)	errors
-  ---------------	--------	----------	----------	----------	----------	--------
-  wait4          	      24	 11363.553	  1008.295	   473.481	     0.006	ECHILD: 12
-  rt_sigprocmask 	      96	     6.760	     1.932	     0.070	     0.007
+  349 syscalls, active time: 5.746ms, user time: 10.892ms, total time: 66.577ms
+  start time: 21:16:56.521660    end time: 21:16:56.588237
+
+  syscall                 count    total (ms)      max (ms)      avg (ms)      min (ms)    errors
+  -----------------    --------    ----------    ----------    ----------    ----------    --------
+  wait4                       2        49.738        49.713        24.869         0.025
+  fcntl                     265         2.447         0.060         0.009         0.008    EBADF: 252
+  execve                      1         1.196         1.196         1.196         1.196
+  clone                       3         0.543         0.325         0.181         0.092
   ---------------
 
-  Child PIDs:  23493, 23498, 23530, 23538, 23539
+  Program Executed: /bin/sh -c "/opt/gitlab/bin/gitlab-psql -d template1 -c 'SELECT datname FROM pg_database' -A | grep -x gitlabhq_production"
+  Time: 21:16:56.533040
+  Exit code: 0
 
-  Slowest file open times for PID 16747:
+  Parent PID:  28898
+  Threads:  28914
+  Child PIDs:  28915, 28916
 
-   open (ms)	      timestamp	        error     	   file name
-  ----------	---------------	   ---------------	   ---------
-       0.041	11:29:54.146422	          -       	   /dev/null
-       0.030	11:29:49.112721	          -       	   /dev/null
+  Slowest file open times for PID 28912:
+
+    dur (ms)       timestamp            error         file name
+  ----------    ---------------    ---------------    ---------
+       0.026    21:16:56.534623           -           /etc/ld.so.cache
+       0.024    21:16:56.534879           -           /lib/x86_64-linux-gnu/libc.so.6
+       0.018    21:16:56.524736           -           /proc/self/status
 ```
 
 ---
@@ -176,16 +193,21 @@ Print a list of all programs executed in session via `execve`
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
 
 ```
-$ strace-parser trace.txt exec --pid 27183 27184 --related
-
+$ strace-parser trace.txt exec --pid 28912 --related
 Programs Executed
 
-      pid	           program            	args
-  -------	          ---------            	--------
-    27183	 /opt/gitlab/embedded/bin/git 	["--git-dir", "/var/opt/gitlab/git-data/repositories/root/project0.git", "cat-file", "--batch"], [/* 4 vars */]
-    27184	 /opt/gitlab/embedded/bin/git 	["--git-dir", "/var/opt/gitlab/git-data/repositories/root/project1.git", "cat-file", "--batch"], [/* 4 vars */]
+  pid       exit    time                program
+  ------    ----    ---------------     -------
+  28898        1    21:16:52.375031     /opt/gitlab/embedded/bin/omnibus-ctl gitlab /opt/gitlab/embedded/service/omnibus-ctl* replicate-geo-database --host=primary.geo.example.com --slot-name=secondary_geo_example_com --backup-timeout=21600
+  28912        0    21:16:56.533040     /bin/sh -c "/opt/gitlab/bin/gitlab-psql -d template1 -c 'SELECT datname FROM pg_database' -A | grep -x gitlabhq_production"
+  28915        0    21:16:56.537770     /opt/gitlab/bin/gitlab-psql -d template1 -c "SELECT datname FROM pg_database" -A
+  28915        0    21:16:56.558860     /opt/gitlab/embedded/bin/chpst -u gitlab-psql -U gitlab-psql /usr/bin/env PGSSLCOMPRESSION=0 /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/gitlab/postgresql -d gitlabhq_production -d template1 -c "SELECT datname FROM pg_database" -A
+  28915        0    21:16:56.564387     /usr/bin/env PGSSLCOMPRESSION=0 /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/gitlab/postgresql -d gitlabhq_production -d template1 -c "SELECT datname FROM pg_database" -A
+  28915        0    21:16:56.566690     /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/gitlab/postgresql -d gitlabhq_production -d template1 -c "SELECT datname FROM pg_database" -A
+  28916        0    21:16:56.538270     /bin/grep -x gitlabhq_production
 ```
 
 ---
@@ -205,6 +227,7 @@ Print a list of all files opened in session via `open` and `openat`
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
 
 ```
 $ strace-parser trace.txt files --pid 2913
@@ -233,6 +256,7 @@ Print details of all `read`, `write`, `recv`, `recvfrom`, `recvmsg`, `send`, `se
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
 
 ```
 I/O Performed
@@ -261,6 +285,7 @@ Prints a log₂ scale histogram of the quantized execution times in μsecs for a
 
 **Flags**:
    * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
 
 ```
 $ strace-parser trace.txt quantize write --pid 2993 28861 --related
@@ -285,14 +310,52 @@ $ strace-parser trace.txt quantize write --pid 2993 28861 --related
 
 ---
 
+#### tree
 
-### Interpreting Output
+Print a `pstree` style graph of PIDs and their children. Sibling threads are surrounded by curly brackets.
 
-`strace` will significantly slow down syscalls execution, so do not consider the times listed as accurate when comparing to how a program performs normally.
+`strace-parser tree [FLAGS]`
+
+**Flags**:
+   * `-t, --truncate` - Truncate commands to 50 characters to prevent line wrapping
+
+```
+$ strace-parser trace.txt tree --truncate
+28897 - exit: 1, cmd: /usr/bin/gitlab-ctl replicate-geo-database --host=...
+  └─28898 - exit: 1, cmd: /opt/gitlab/embedded/bin/omnibus-ctl gitlab /opt/g...
+     ├─{28899}
+     ├─{28906}
+     ├─{28913}
+     ├─{28920}
+     ├─{28927}
+     ├─28905 - exit: 0, cmd: /usr/bin/locale -a
+     │  └─{28907}
+     ├─28912 - exit: 0, cmd: /bin/sh -c "/opt/gitlab/bin/gitlab-psql -d templat...
+     │  ├─{28914}
+     │  ├─28915 - exit: 0, cmd: /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/...
+     │  │  └─28917 - exit: 0, cmd: /usr/bin/id -n -u
+     │  └─28916 - exit: 0, cmd: /bin/grep -x gitlabhq_production
+     ├─28919 - exit: 0, cmd: /bin/sh -c "/opt/gitlab/bin/gitlab-psql -d gitlabh...
+     │  ├─{28921}
+     │  ├─28922 - exit: 0, cmd: /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/...
+     │  │  └─28924 - exit: 0, cmd: /usr/bin/id -n -u
+     │  └─28923 - exit: 0, cmd: /bin/grep -x projects
+     └─28926 - exit: 0, cmd: /bin/sh -c "/opt/gitlab/bin/gitlab-psql -d gitlabh...
+        ├─{28928}
+        └─28929 - exit: 0, cmd: /opt/gitlab/embedded/bin/psql -p 5432 -h /var/opt/...
+           └─28930 - exit: 0, cmd: /usr/bin/id -n -u
+```
+
+---
+
+## Interpreting Output
+
+`strace` will significantly slow down syscalls execution, so do not consider the times listed
+as accurate when comparing to how a program performs normally.
 
 That said, it is very useful for understanding what calls are made and their _relative_ cost.  
 
-#### Example 1
+### Example 1
 
 ```
 $ strace-parser trace1.txt pid 97266
@@ -351,7 +414,7 @@ PID 97266
        0.342    08:42:44.997547        ENOENT         /gitlab-data/git-data/repositories/group_name/project.git/objects/info/alternates
 ```
 
-#### Example 2
+### Example 2
 
 ```
 $ strace-parser trace2.txt pid 64205
@@ -416,4 +479,9 @@ Here's a comparison of two git processes on different infrastructure.
     * 33 calls to `mmap` take < 1ms for example 1, but 27 calls to it take 12ms for example 2.
     * Most other syscalls are significantly slower, with the exceptions of calls that rely on the filesystem.
 
-Based on this, we can say that example 1 is bottlenecked by block I/O, while example 2 is bound by general system performance - perhaps high load.
+Based on this, we can guess that example 1 is bottlenecked by block I/O, while example 2 is bound by general system performance - perhaps high load.
+
+## Known Issues
+
+* PID reuse is not handled; separate processes with the same PID will be tracked as a single entity.
+* Existing thread relationships are not removed when from a process when it executes `execve`.

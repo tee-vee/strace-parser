@@ -96,10 +96,10 @@ impl fmt::Display for Execs {
                 "  Program Executed: {}",
                 Execs::replace_newlines(cmd, 23)
             )?;
-            writeln!(f, "  Time: {}", time)?;
+            write!(f, "  Time: {}", time)?;
 
             if iter.peek().is_some() {
-                writeln!(f)?;
+                writeln!(f, "\n")?;
             }
         }
 

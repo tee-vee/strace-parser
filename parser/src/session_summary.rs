@@ -174,7 +174,6 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-
         let mut thread_map: HashMap<Pid, HashSet<Pid>> = HashMap::new();
         for (addr, pids) in &addr_map {
             let mut dfs = Dfs::new(&addr_graph, addr);
@@ -324,19 +323,32 @@ impl<'a> SessionSummary<'a> {
             writeln!(stdout(), "PID {}\n", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
-            if let Some(exec) = &pid_summary.execve {
-                writeln!(stdout())?;
-                writeln!(stdout(), "{}", exec)?;
-            } else if pid_summary.parent_pid.is_some()
-                || pid_summary.threads.is_empty()
-                || pid_summary.child_pids.is_empty()
-                || pid_summary.exit_code.is_none()
-            {
-                writeln!(stdout())?;
-            }
-
-            if let Some(exit) = &pid_summary.exit_code {
-                writeln!(stdout(), "  Exit code: {}", exit)?;
+            match (&pid_summary.execve, &pid_summary.exit_code) {
+                (Some(exec), Some(exit)) => {
+                    writeln!(stdout())?;
+                    writeln!(stdout(), "{}", exec)?;
+                    writeln!(stdout(), "  Exit code: {}", exit)?;
+                    writeln!(stdout())?;
+                }
+                (Some(exec), None) => {
+                    writeln!(stdout())?;
+                    writeln!(stdout(), "{}", exec)?;
+                    writeln!(stdout())?;
+                }
+                (None, Some(exit)) => {
+                    writeln!(stdout())?;
+                    writeln!(stdout(), "  Exit code: {}", exit)?;
+                    writeln!(stdout())?;
+                }
+                (None, None) => {
+                    if pid_summary.parent_pid.is_some()
+                        || pid_summary.threads.is_empty()
+                        || pid_summary.child_pids.is_empty()
+                        || pid_summary.exit_code.is_none()
+                    {
+                        writeln!(stdout())?;
+                    }
+                }
             }
 
             pid_summary.print_related_pids(PrintAmt::Some(PRINT_COUNT))?;
@@ -365,6 +377,10 @@ impl<'a> SessionSummary<'a> {
                 if let Some(exit) = &pid_summary.exit_code {
                     writeln!(stdout(), "  Exit code: {}", exit)?;
                 }
+                if pid_summary.execve.is_some() || pid_summary.exit_code.is_some() {
+                    writeln!(stdout())?;
+                }
+
                 pid_summary.print_related_pids(PrintAmt::All)?;
 
                 if let Some(pid_files) = file_times.get(&pid) {
@@ -704,19 +720,34 @@ mod tests {
         let mut all_pids = BTreeSet::new();
         all_pids.extend(&[17038, 17041, 17043, 24518, 24685]);
 
-        let union: BTreeSet<_> = summary.pid_summaries[&17038].threads.intersection(&all_pids).collect();
-        assert_eq!(union, [17041, 17043, 24518, 24685].iter().collect());
+        let isect: BTreeSet<_> = summary.pid_summaries[&17038]
+            .threads
+            .intersection(&all_pids)
+            .collect();
+        assert_eq!(isect, [17041, 17043, 24518, 24685].iter().collect());
 
-        let union: BTreeSet<_> = summary.pid_summaries[&17041].threads.intersection(&all_pids).collect();
-        assert_eq!(union, [17038, 17043, 24518, 24685].iter().collect());
+        let isect: BTreeSet<_> = summary.pid_summaries[&17041]
+            .threads
+            .intersection(&all_pids)
+            .collect();
+        assert_eq!(isect, [17038, 17043, 24518, 24685].iter().collect());
 
-        let union: BTreeSet<_> = summary.pid_summaries[&17043].threads.intersection(&all_pids).collect();
-        assert_eq!(union, [17038, 17041, 24518, 24685].iter().collect());
+        let isect: BTreeSet<_> = summary.pid_summaries[&17043]
+            .threads
+            .intersection(&all_pids)
+            .collect();
+        assert_eq!(isect, [17038, 17041, 24518, 24685].iter().collect());
 
-        let union: BTreeSet<_> = summary.pid_summaries[&24518].threads.intersection(&all_pids).collect();
-        assert_eq!(union, [17038, 17041, 17043, 24685].iter().collect());
+        let isect: BTreeSet<_> = summary.pid_summaries[&24518]
+            .threads
+            .intersection(&all_pids)
+            .collect();
+        assert_eq!(isect, [17038, 17041, 17043, 24685].iter().collect());
 
-        let union: BTreeSet<_> = summary.pid_summaries[&24685].threads.intersection(&all_pids).collect();
-        assert_eq!(union, [17038, 17041, 17043, 24518].iter().collect());
+        let isect: BTreeSet<_> = summary.pid_summaries[&24685]
+            .threads
+            .intersection(&all_pids)
+            .collect();
+        assert_eq!(isect, [17038, 17041, 17043, 24518].iter().collect());
     }
 }
