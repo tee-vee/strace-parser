@@ -1,13 +1,13 @@
 [package]
 name = "strace-parser"
-version = "0.5.2"
+version = "0.6.0"
 authors = ["Will Chandler <wchandler@gitlab.com>"]
 edition = "2018"
 build = "build.rs"
 
 [dependencies]
 chrono = "0.4.11"
-clap = "2.33.0"
+clap = "2.33.1"
 memmap = "0.7.0"
 parser = { path = "parser" }
 
@@ -18,10 +18,10 @@ jemallocator = "0.3.2"
 # Can't use criterion on musl as it uses proc macros
 [target.'cfg(not(target_env = "musl"))'.dev-dependencies]
 criterion = "0.3.2"
-rayon = "1.3.0"
+rayon = "1.3.1"
 
 [build-dependencies]
-clap = "2.33.0"
+clap = "2.33.1"
 parser = { path = "parser" }
 
 [workspace]
