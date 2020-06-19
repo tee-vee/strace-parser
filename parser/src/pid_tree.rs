@@ -1,7 +1,7 @@
 use crate::pid_summary::PidSummary;
 use crate::HashMap;
 use crate::Pid;
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::io;
 use std::io::prelude::*;
 
@@ -44,7 +44,7 @@ pub fn print_tree(
     pid: Pid,
     pid_summaries: &HashMap<Pid, PidSummary>,
     done: &mut Vec<Pid>,
-    filled_cols: &mut BTreeSet<usize>,
+    filled_cols: &mut HashSet<usize>,
     truncate: bool,
     print_info: TreePrint,
 ) -> Result<(), io::Error> {

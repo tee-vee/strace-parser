@@ -91,8 +91,16 @@ impl<'a> SessionSummary<'a> {
             SortBy::Pid => {
                 sorted_summaries.par_sort_by(|(pid_x, _), (pid_y, _)| (pid_x).cmp(pid_y));
             }
+            // We don't know the true order for any process not forked during the trace
+            // Assume that these start from lowest pid, then sort the pids forked
+            // during trace by start time
             SortBy::StartTime => {
-                sorted_summaries.par_sort_by(|(_, x), (_, y)| (x.start_time).cmp(&y.start_time));
+                let (mut existing, mut forked): (Vec<_>, Vec<_>) = sorted_summaries.into_iter().partition(|(_, s)| s.parent_pid.is_none());
+                existing.sort_by(|(pid_x, _), (pid_y, _)| pid_x.cmp(&pid_y));
+                forked.sort_by(|(_, x), (_, y)| (x.start_time).cmp(&y.start_time));
+                existing.extend(forked);
+
+                sorted_summaries = existing
             }
             SortBy::SyscallCount => {
                 sorted_summaries
@@ -570,7 +578,7 @@ impl<'a> SessionSummary<'a> {
             .cloned()
             .collect();
         let mut done = Vec::new();
-        let mut filled_cols = BTreeSet::new();
+        let mut filled_cols = HashSet::new();
 
         let mut pid_iter = pids.iter().peekable();
         while let Some(&pid) = pid_iter.next() {
@@ -749,5 +757,19 @@ mod tests {
             .intersection(&all_pids)
             .collect();
         assert_eq!(isect, [17038, 17041, 17043, 24518].iter().collect());
+    }
+
+    #[test]
+    fn pid_summary_pid_start_time_sort() {
+        let input = r##"32766  07:55:04.273462 <... clone resumed> child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 26124 <0.002655>
+26124 07:55:04.270880 rt_sigaction(SIGHUP, {sa_handler=SIG_DFL, sa_mask=~[], sa_flags=SA_RESTORER|SA_ONSTACK|SA_RESTART|SA_SIGINFO, sa_restorer=0x462ca0}, NULL, 8) = 0 <0.000016>
+9746  07:55:15.336457 <... clone resumed> child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 412 <0.002946>
+412 07:55:15.336879 close(3</etc/ld.so.cache> <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
+        let sorted: Vec<_> = summary.to_sorted(SortBy::StartTime).into_iter().map(|(p, _)| p).collect();
+        assert_eq!(sorted,
+                   &[9746, 32766, 26124, 412]);
     }
 }
