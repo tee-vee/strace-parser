@@ -26,7 +26,8 @@ pub struct PidData<'a> {
     pub start_time: &'a str,
     pub end_time: &'a str,
     pub pvt_futex: HashSet<&'a str>,
-    pub threads: HashSet<Pid>,
+    pub split_clones: Vec<RawData<'a>>,
+    pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
@@ -41,12 +42,30 @@ impl<'a> PidData<'a> {
             start_time: "zzzzz", // greater than any valid time str
             end_time: "00000",   // less than any valid time str
             pvt_futex: HashSet::new(),
-            threads: HashSet::new(),
+            split_clones: Vec::new(),
+            threads: Vec::new(),
             child_pids: Vec::new(),
             open_events: Vec::new(),
             io_events: Vec::new(),
             execve: None,
             exit_code: None,
+        }
+    }
+
+    fn coalesce_split_clones(&mut self) {
+        self.split_clones.sort_by(|a, b| a.time.cmp(&b.time));
+
+        let mut pairs = self.split_clones.chunks_exact(2);
+            while let Some([start, end]) = pairs.next() {
+                match (&start.other, &end.rtn_cd) {
+                    (Some(OtherFields::Clone(ProcType::Process)), Some(child_pid)) => {
+                        self.child_pids.push(*child_pid);
+                    }
+                    (Some(OtherFields::Clone(ProcType::Thread)), Some(thread_pid)) => {
+                        self.threads.push(*thread_pid);
+                    }
+                    _ => {}
+            }
         }
     }
 }
@@ -77,7 +96,7 @@ impl<'a> TryFrom<RawData<'a>> for RawExec<'a> {
 }
 
 pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
-    buffer
+    let mut data_map = buffer
         .par_lines()
         .fold(HashMap::default, |mut pid_data_map, line| {
             if let Some(raw_data) = parser::parse_line(line) {
@@ -88,7 +107,13 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
         .reduce(HashMap::default, |mut pid_data_map, temp_map| {
             coalesce_pid_data(&mut pid_data_map, temp_map);
             pid_data_map
-        })
+        });
+
+    data_map.par_iter_mut().for_each(|(_, pid_data)| {
+        pid_data.coalesce_split_clones();
+    });
+
+    data_map
 }
 
 fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: RawData<'a>) {
@@ -119,12 +144,15 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
     }
 
     match raw_data.syscall {
-        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, raw_data.other) {
+        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
             (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
                 pid_entry.child_pids.push(child_pid as Pid)
             }
             (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
-                pid_entry.threads.insert(child_pid as Pid);
+                pid_entry.threads.push(child_pid as Pid);
+            }
+            (None, Some(_)) | (Some(_), None) => {
+                pid_entry.split_clones.push(raw_data);
             }
             _ => {}
         },
@@ -189,6 +217,8 @@ fn coalesce_pid_data<'a>(
         }
 
         pid_entry.pvt_futex.extend(temp_pid_data.pvt_futex);
+
+        pid_entry.split_clones.extend(temp_pid_data.split_clones);
 
         pid_entry.threads.extend(temp_pid_data.threads);
 
@@ -257,6 +287,22 @@ mod tests {
         let input = r##"477   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000134>"##.to_string();
         let pid_data_map = build_syscall_data(&input);
         assert!(pid_data_map[&477].child_pids.contains(&7390));
+    }
+
+    #[test]
+    fn syscall_data_captures_split_clone_proc() {
+        let input = r##"17826 13:43:48.980451 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+17826 13:43:48.993404 <... clone resumed>) = 17906 <0.012945>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        assert!(pid_data_map[&17826].child_pids.contains(&17906));
+    }
+
+    #[test]
+    fn syscall_data_captures_split_clone_thread() {
+        let input = r##"17839 13:43:43.960050 clone(child_stack=0x7f1afced1ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
+17839 13:43:43.960137 <... clone resumed>, parent_tid=[17857], tls=0x7f1afced2700, child_tidptr=0x7f1afced29d0) = 17857 <0.000076>"##.to_string();
+        let pid_data_map = build_syscall_data(&input);
+        assert!(pid_data_map[&17839].threads.contains(&17857));
     }
 
     #[test]

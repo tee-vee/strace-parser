@@ -105,11 +105,13 @@ where
 
             match syscall {
                 "clone" => {
-                    let flags = tokens.nth(2)?;
-                    if flags.contains(CLONE_THREAD) {
-                        other = Some(OtherFields::Clone(ProcType::Thread))
-                    } else {
-                        other = Some(OtherFields::Clone(ProcType::Process))
+                    if tokens.next().map(|t| !t.ends_with(')')).unwrap_or_default() {
+                        let flags = tokens.nth(1)?;
+                        if flags.contains(CLONE_THREAD) {
+                            other = Some(OtherFields::Clone(ProcType::Thread));
+                        } else if flags.starts_with("flags") {
+                            other = Some(OtherFields::Clone(ProcType::Process));
+                        }
                     }
                 }
                 "fork" | "vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
@@ -172,12 +174,13 @@ where
                 "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
                     other = Some(OtherFields::Clone(ProcType::Process))
                 }
-                "clone" if matches!(call_status, CallStatus::Complete) => {
-                    let flags = tokens.next()?;
-                    if flags.contains(CLONE_THREAD) {
-                        other = Some(OtherFields::Clone(ProcType::Thread));
-                    } else {
-                        other = Some(OtherFields::Clone(ProcType::Process));
+                "clone" => {
+                    if let Some(flags) = tokens.next() {
+                        if flags.contains(CLONE_THREAD) {
+                            other = Some(OtherFields::Clone(ProcType::Thread));
+                        } else {
+                            other = Some(OtherFields::Clone(ProcType::Process));
+                        }
                     }
                 }
                 "exit" | "_exit" | "exit_group" => {
@@ -525,6 +528,61 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn parser_captures_started_clone_proc() {
+        let input = r##"16093 04:37:37.662748 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 16093,
+                time: "04:37:37.662748",
+                syscall: "clone",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Started,
+                other: Some(OtherFields::Clone(ProcType::Process)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_resumed_clone_immediate_end() {
+        let input = r##"17826 13:43:48.972999 <... clone resumed>) = 17905 <0.008941>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 17826,
+                time: "13:43:48.972999",
+                syscall: "clone",
+                duration: Some(0.008941),
+                error: None,
+                rtn_cd: Some(17905),
+                call_status: CallStatus::Resumed,
+                other: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_resumed_clone_no_flags() {
+        let input = r##"17821 13:43:39.901584 <... clone resumed>, parent_tid=[17825], tls=0x7f1c6df50700, child_tidptr=0x7f1c6df509d0) = 17825 <0.000064>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 17821,
+                time: "13:43:39.901584",
+                syscall: "clone",
+                duration: Some(0.000064),
+                error: None,
+                rtn_cd: Some(17825),
+                call_status: CallStatus::Resumed,
+                other: None,
+            })
+        );
+    }
+
 
     #[test]
     fn parser_captures_resumed_clone_thread() {
