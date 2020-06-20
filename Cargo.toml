@@ -12,7 +12,7 @@ memmap = "0.7.0"
 parser = { path = "parser" }
 
 # It's a pain to get jemalloc working on musl
-[target.'cfg(not(target_env = "musl"))'.dependencies]
+# [target.'cfg(not(target_env = "musl"))'.dependencies]
 jemallocator = "0.3.2"
 
 # Can't use criterion on musl as it uses proc macros
