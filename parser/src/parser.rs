@@ -68,8 +68,12 @@ fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
 where
     I: DoubleEndedIterator<Item = &'a str>,
 {
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    // ^^^^^
     let pid = tokens.next().and_then(|p| p.parse::<Pid>().ok())?;
 
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    //       ^^^^^^^^^^^^^^^
     let time = tokens.next().filter(|time_token| {
         time_token
             .chars()
@@ -78,10 +82,16 @@ where
             .is_some()
     })?;
 
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    //                                                     ^^^^^^^^^^
     let duration_token = tokens.next_back()?;
 
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    //                       ^^^^^^^^^
     let syscall_token = tokens.next()?;
 
+    // 17819 13:43:39.897107 <... rt_sigprocmask resumed>NULL, 8) = 0 <0.000016>
+    //                       ^^^^
     let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
     } else if duration_token.starts_with('<') {
@@ -95,6 +105,8 @@ where
 
     match call_status {
         CallStatus::Resumed => {
+            // 17819 13:43:39.897107 <... rt_sigprocmask resumed>NULL, 8) = 0 <0.000016>
+            //                            ^^^^^^^^^^^^^^
             syscall = tokens.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
@@ -105,7 +117,11 @@ where
 
             match syscall {
                 "clone" => {
+                    // 17819 13:43:39.897681 <... clone resumed>, parent_tid=[17822], tls=0x7f1c6f753700, child_tidptr=0x7f1c6f7539d0) = 17822 <0.000041>
+                    //                                  ^^^^^^^^^
                     if tokens.next().map(|t| !t.ends_with(')')).unwrap_or_default() {
+                        // 10738 01:58:22.788361 <... clone resumed> child_stack=0, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 13442 <0.002381>
+                        //                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                         let flags = tokens.nth(1)?;
                         if flags.contains(CLONE_THREAD) {
                             other = Some(OtherFields::Clone(ProcType::Thread));
@@ -119,8 +135,12 @@ where
             }
         }
         CallStatus::Complete | CallStatus::Started => {
+            // 17819 13:43:39.892101 sigaltstack(NULL, {ss_sp=NULL, ss_flags=SS_DISABLE, ss_size=0}) = 0 <0.000012>
+            //                       ^^^^^^^^^^^ ^^^^^
             let mut syscall_split = syscall_token.splitn(2, '(');
 
+            // 17819 13:43:39.892101 sigaltstack(NULL, {ss_sp=NULL, ss_flags=SS_DISABLE, ss_size=0}) = 0 <0.000012>
+            //                       ^^^^^^^^^^^
             syscall = syscall_split.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
@@ -131,16 +151,22 @@ where
 
             match syscall {
                 "open" => {
+                    // 17819 13:43:39.888967 open("/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache> <0.000014>
+                    //                             ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
                 "openat" => {
+                    // 17819 13:43:40.146677 openat(AT_FDCWD, "config.toml", O_RDONLY|O_CLOEXEC) = 3</var/opt/gitlab/gitaly/config.toml> <0.000026>
+                    //                                         ^^^^^^^^^^^
                     if let Some(f) = tokens.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
                 "execve" => {
+                    // 17840 13:43:41.449433 execve("/bin/ps", ["ps", "-o", "rss=", "-p", "17838"], 0xc0001c2000 /* 22 vars */ <unfinished ...>
+                    //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^ 
                     if let Some(t) = syscall_split.next() {
                         let mut v = vec![t];
                         tokens
@@ -152,7 +178,11 @@ where
                     }
                 }
                 "futex" => {
+                    // 17826 13:43:41.450300 futex(0xc00005ef48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
+                    //                             ^^^^^^^^^^^^
                     if let Some(addr) = syscall_split.next().and_then(|a| a.get(..a.len() - 1)) {
+                        // 17826 13:43:41.450300 futex(0xc00005ef48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
+                        //                                           ^^^^^^^^^^^^^^^^^^^
                         if tokens
                             .next()
                             .map(|t| t.contains("PRIVATE"))
@@ -163,7 +193,9 @@ where
                     }
                 }
                 "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
-                | "write" => {
+                    | "write" => {
+                    // 17819 13:43:41.450318 read(22<pipe:[879334396]>,  <unfinished ...>
+                    //                               ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split
                         .next()
                         .and_then(|s| s.splitn(2, '<').nth(1).and_then(|s| s.get(..s.len() - 2)))
@@ -171,10 +203,13 @@ where
                         other = Some(OtherFields::File(f));
                     }
                 }
+                // Only set other when call is complete as new pid is not available on started
                 "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
                     other = Some(OtherFields::Clone(ProcType::Process))
                 }
                 "clone" => {
+                    // 17822 13:43:41.413034 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+                    //                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                     if let Some(flags) = tokens.next() {
                         if flags.contains(CLONE_THREAD) {
                             other = Some(OtherFields::Clone(ProcType::Thread));
@@ -184,6 +219,8 @@ where
                     }
                 }
                 "exit" | "_exit" | "exit_group" => {
+                    // 13612 01:59:35.767337 exit_group(0)     = ?
+                    //                                  ^
                     if let Some(exit_code) = syscall_split
                         .next()
                         .map(|s| s.splitn(2, ')'))
@@ -198,6 +235,8 @@ where
         }
     }
 
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    //                                                     ^^^^^^^^^^
     let duration = if duration_token.starts_with('<') {
         duration_token
             .get(1..duration_token.len() - 1)
@@ -210,13 +249,19 @@ where
     let mut error = None;
 
     if duration.is_some() {
+        // 17826 13:43:40.155194 <... epoll_ctl resumed>) = -1 EPERM (Operation not permitted) <0.000029>
+        //                                                  ^^ ^^^^^ ^^^^^^^^^^ ^^^ ^^^^^^^^^^
         let mut end_tokens = tokens.rev().take_while(|&t| t != "=").peekable();
 
         while let Some(token) = end_tokens.next() {
+            // 17826 13:43:40.155194 <... epoll_ctl resumed>) = -1 EPERM (Operation not permitted) <0.000029>
+            //                                                     ^^^^^
             if token.starts_with('E') {
                 error = Some(token);
             }
 
+            // 17819 13:43:40.149100 read(6</proc/sys/net/core/somaxconn>, "", 65531) = 0 <0.000013>
+            //                                                                          ^
             if end_tokens.peek().is_none() {
                 match syscall {
                     "clone" | "fork" | "vfork" | "read" | "recv" | "recvfrom" | "recvmsg"
