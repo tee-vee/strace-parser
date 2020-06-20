@@ -13,7 +13,6 @@ tests:
   stage: test
   script:
   - rustc --version && cargo --version      # Print version info for debugging
-  - sleep 10000
   - cargo test --all --verbose
 
 release_build:
