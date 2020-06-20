@@ -10,6 +10,7 @@ tests:
   - apk add build-base
   - rustc --version && cargo --version      # Print version info for debugging
   - cargo test --all --verbose
+  - cargo bench
 
 release_build:
   stage: build
