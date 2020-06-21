@@ -1,8 +1,15 @@
-image: "rust:alpine"
+image: "rust:1.44.1-alpine3.12"
 
 stages:
   - test
   - build
+  - bench
+
+default:
+  before_script:
+    - apk add build-base
+    - rustup install nightly
+    - rustup default nightly
 
 tests:
   stage: test
@@ -25,3 +32,11 @@ release_build:
     refs:
       - master
       - tags
+
+benches:
+  stage: bench
+  script:
+    - cargo bench
+  only:
+    variables:
+      - $BENCH
