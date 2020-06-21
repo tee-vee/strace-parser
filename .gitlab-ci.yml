@@ -8,6 +8,8 @@ stages:
 default:
   before_script:
     - apk add build-base
+    - rustup install nightly
+    - rustup default nightly
 
 tests:
   stage: test
