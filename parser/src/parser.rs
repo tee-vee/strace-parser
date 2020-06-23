@@ -1,10 +1,16 @@
 use crate::Pid;
+use syscall::SyscallAtom;
+
+#[macro_use]
+pub mod syscall {
+    include!(concat!(env!("OUT_DIR"), "/syscall_atom.rs"));
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
     pub pid: Pid,
     pub time: &'a str,
-    pub syscall: &'a str,
+    pub syscall: SyscallAtom,
     pub duration: Option<f32>,
     pub error: Option<&'a str>,
     pub rtn_cd: Option<i32>,
@@ -100,23 +106,24 @@ where
         CallStatus::Started
     };
 
-    let syscall;
+    let syscall: SyscallAtom;
     let mut other = None;
 
     match call_status {
         CallStatus::Resumed => {
             // 17819 13:43:39.897107 <... rt_sigprocmask resumed>NULL, 8) = 0 <0.000016>
             //                            ^^^^^^^^^^^^^^
-            syscall = tokens.next().filter(|syscall_tok| {
+            let syscall_str = tokens.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
                     .next()
                     .filter(|c| c.is_ascii_alphabetic())
                     .is_some()
             })?;
+            syscall = SyscallAtom::from(syscall_str);
 
-            match syscall {
-                "clone" => {
+            match &syscall {
+                &syscall_atom!("clone") => {
                     // 17819 13:43:39.897681 <... clone resumed>, parent_tid=[17822], tls=0x7f1c6f753700, child_tidptr=0x7f1c6f7539d0) = 17822 <0.000041>
                     //                                  ^^^^^^^^^
                     if tokens.next().map(|t| !t.ends_with(')')).unwrap_or_default() {
@@ -130,7 +137,7 @@ where
                         }
                     }
                 }
-                "fork" | "vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
+                &syscall_atom!("fork") | &syscall_atom!("vfork") => other = Some(OtherFields::Clone(ProcType::Process)),
                 _ => {}
             }
         }
@@ -141,32 +148,33 @@ where
 
             // 17819 13:43:39.892101 sigaltstack(NULL, {ss_sp=NULL, ss_flags=SS_DISABLE, ss_size=0}) = 0 <0.000012>
             //                       ^^^^^^^^^^^
-            syscall = syscall_split.next().filter(|syscall_tok| {
+            let syscall_str = syscall_split.next().filter(|syscall_tok| {
                 syscall_tok
                     .chars()
                     .next()
                     .filter(|&c| c.is_ascii_alphabetic() || c == '_')
                     .is_some()
             })?;
+            syscall = SyscallAtom::from(syscall_str);
 
-            match syscall {
-                "open" => {
+            match &syscall {
+                &syscall_atom!("open") => {
                     // 17819 13:43:39.888967 open("/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache> <0.000014>
                     //                             ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
-                "openat" => {
+                &syscall_atom!("openat") => {
                     // 17819 13:43:40.146677 openat(AT_FDCWD, "config.toml", O_RDONLY|O_CLOEXEC) = 3</var/opt/gitlab/gitaly/config.toml> <0.000026>
                     //                                         ^^^^^^^^^^^
                     if let Some(f) = tokens.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
-                "execve" => {
+                &syscall_atom!("execve") => {
                     // 17840 13:43:41.449433 execve("/bin/ps", ["ps", "-o", "rss=", "-p", "17838"], 0xc0001c2000 /* 22 vars */ <unfinished ...>
-                    //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^ 
+                    //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^
                     if let Some(t) = syscall_split.next() {
                         let mut v = vec![t];
                         tokens
@@ -177,7 +185,7 @@ where
                         other = Some(OtherFields::Execve(v));
                     }
                 }
-                "futex" => {
+                &syscall_atom!("futex") => {
                     // 17826 13:43:41.450300 futex(0xc00005ef48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
                     //                             ^^^^^^^^^^^^
                     if let Some(addr) = syscall_split.next().and_then(|a| a.get(..a.len() - 1)) {
@@ -192,8 +200,8 @@ where
                         }
                     }
                 }
-                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
-                    | "write" => {
+                &syscall_atom!("read") | &syscall_atom!("recv") | &syscall_atom!("recvfrom") | &syscall_atom!("recvmsg") | &syscall_atom!("send") | &syscall_atom!("sendmsg") | &syscall_atom!("sendto")
+                | &syscall_atom!("write") => {
                     // 17819 13:43:41.450318 read(22<pipe:[879334396]>,  <unfinished ...>
                     //                               ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split
@@ -204,10 +212,10 @@ where
                     }
                 }
                 // Only set other when call is complete as new pid is not available on started
-                "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
+                &syscall_atom!("fork") | &syscall_atom!("vfork") if matches!(call_status, CallStatus::Complete) => {
                     other = Some(OtherFields::Clone(ProcType::Process))
                 }
-                "clone" => {
+                &syscall_atom!("clone") => {
                     // 17822 13:43:41.413034 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
                     //                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                     if let Some(flags) = tokens.next() {
@@ -218,7 +226,7 @@ where
                         }
                     }
                 }
-                "exit" | "_exit" | "exit_group" => {
+                &syscall_atom!("exit") | &syscall_atom!("_exit") | &syscall_atom!("exit_group") => {
                     // 13612 01:59:35.767337 exit_group(0)     = ?
                     //                                  ^
                     if let Some(exit_code) = syscall_split
@@ -263,9 +271,9 @@ where
             // 17819 13:43:40.149100 read(6</proc/sys/net/core/somaxconn>, "", 65531) = 0 <0.000013>
             //                                                                          ^
             if end_tokens.peek().is_none() {
-                match syscall {
-                    "clone" | "fork" | "vfork" | "read" | "recv" | "recvfrom" | "recvmsg"
-                    | "send" | "sendmsg" | "sendto" | "write" => rtn_cd = token.parse::<i32>().ok(),
+                match &syscall {
+                    &syscall_atom!("clone") | &syscall_atom!("fork") | &syscall_atom!("vfork") | &syscall_atom!("read") | &syscall_atom!("recv") | &syscall_atom!("recvfrom") | &syscall_atom!("recvmsg")
+                    | &syscall_atom!("send") | &syscall_atom!("sendmsg") | &syscall_atom!("sendto") | &syscall_atom!("write") => rtn_cd = token.parse::<i32>().ok(),
                     _ => {}
                 }
             }
@@ -627,7 +635,6 @@ mod tests {
             })
         );
     }
-
 
     #[test]
     fn parser_captures_resumed_clone_thread() {

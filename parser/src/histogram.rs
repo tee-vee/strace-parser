@@ -1,3 +1,4 @@
+use crate::parser::syscall::SyscallAtom;
 use crate::syscall_data::PidData;
 use crate::HashMap;
 use crate::Pid;
@@ -5,11 +6,12 @@ use std::collections::BTreeMap;
 use std::io::{prelude::*, stdout, Error};
 
 pub fn print_histogram(
-    syscall: &str,
+    syscall_str: &str,
     pids: &[Pid],
     syscall_data: &HashMap<Pid, PidData>,
 ) -> Result<(), Error> {
-    let distribution = build_distribution(syscall, pids, syscall_data);
+    let syscall = SyscallAtom::from(syscall_str);
+    let distribution = build_distribution(&syscall, pids, syscall_data);
 
     let pid_list = build_pid_list(pids);
 
@@ -64,7 +66,7 @@ pub fn print_histogram(
 }
 
 fn build_distribution(
-    syscall: &str,
+    syscall: &SyscallAtom,
     pids: &[Pid],
     syscall_data: &HashMap<Pid, PidData>,
 ) -> BTreeMap<u32, i32> {

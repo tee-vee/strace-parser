@@ -1,4 +1,4 @@
-use crate::parser::{CallStatus, RawData};
+use crate::parser::{CallStatus, RawData, syscall::SyscallAtom};
 use crate::syscall_data::PidData;
 use crate::{HashMap, Pid};
 use rayon::prelude::*;
@@ -9,7 +9,7 @@ use std::fmt;
 pub struct IoCall<'a> {
     pub pid: Pid,
     pub time: &'a str,
-    pub syscall: &'a str,
+    pub syscall: SyscallAtom,
     pub fd: &'a str,
     pub bytes: i32,
     pub duration: f32,
@@ -56,7 +56,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
             CallStatus::Complete => io_calls.push(IoCall {
                 pid: event.pid,
                 time: event.time,
-                syscall: event.syscall,
+                syscall: event.syscall.clone(),
                 fd: event
                     .file()
                     .unwrap_or("Unavailable: '-y' flag was not passed to strace"),
@@ -69,7 +69,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                     io_calls.push(IoCall {
                         pid: event.pid,
                         time: event.time,
-                        syscall: event.syscall,
+                        syscall: event.syscall.clone(),
                         fd: event
                             .file()
                             .unwrap_or("Unavailable: '-y' flag was not passed to strace"),

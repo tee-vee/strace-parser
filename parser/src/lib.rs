@@ -1,13 +1,13 @@
-#![cfg_attr(feature = "nightly", feature(split_ascii_whitespace))]
-
 use self::pid_summary::PidSummary;
 use self::sort_by::{SortBy, SortEventsBy};
+
+#[macro_use]
+pub mod parser;
 
 pub mod exec;
 pub mod file_data;
 pub mod histogram;
 pub mod io_data;
-pub mod parser;
 pub mod pid_summary;
 pub mod pid_tree;
 pub mod session_summary;

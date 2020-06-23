@@ -1,5 +1,5 @@
 use crate::parser;
-use crate::parser::{OtherFields, ProcType, RawData};
+use crate::parser::{OtherFields, ProcType, RawData, syscall::SyscallAtom};
 use crate::Pid;
 use crate::{HashMap, HashSet};
 use rayon::prelude::*;
@@ -22,7 +22,7 @@ impl<'a> SyscallData<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub struct PidData<'a> {
-    pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
+    pub syscall_data: HashMap<SyscallAtom, SyscallData<'a>>,
     pub start_time: &'a str,
     pub end_time: &'a str,
     pub pvt_futex: HashSet<&'a str>,
@@ -123,7 +123,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
 
     let syscall_entry = pid_entry
         .syscall_data
-        .entry(raw_data.syscall)
+        .entry(raw_data.syscall.clone())
         .or_insert_with(SyscallData::new);
 
     if let Some(duration) = raw_data.duration {
@@ -143,8 +143,8 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         *error_entry += 1;
     }
 
-    match raw_data.syscall {
-        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
+    match &raw_data.syscall {
+        &syscall_atom!("clone") | &syscall_atom!("fork") | &syscall_atom!("vfork") => match (raw_data.rtn_cd, &raw_data.other) {
             (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
                 pid_entry.child_pids.push(child_pid as Pid)
             }
@@ -156,7 +156,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
             }
             _ => {}
         },
-        "execve" => {
+        &syscall_atom!("execve") => {
             if let Ok(e) = RawExec::try_from(raw_data) {
                 if let Some(execs) = &mut pid_entry.execve {
                     execs.push(e);
@@ -165,18 +165,18 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
                 }
             }
         }
-        "futex" => {
+        &syscall_atom!("futex") => {
             if let Some(OtherFields::Futex(addr)) = raw_data.other {
                 pid_entry.pvt_futex.insert(addr);
             }
         }
-        "open" | "openat" => {
+        &syscall_atom!("open") | &syscall_atom!("openat") => {
             pid_entry.open_events.push(raw_data);
         }
-        "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+        &syscall_atom!("read") | &syscall_atom!("recv") | &syscall_atom!("recvfrom") | &syscall_atom!("recvmsg") | &syscall_atom!("send") | &syscall_atom!("sendmsg") | &syscall_atom!("sendto") | &syscall_atom!("write") => {
             pid_entry.io_events.push(raw_data);
         }
-        "exit" | "_exit" | "exit_group" => {
+        &syscall_atom!("exit") | &syscall_atom!("_exit") | &syscall_atom!("exit_group") => {
             if let Some(OtherFields::Exit(exit_code)) = raw_data.other {
                 pid_entry.exit_code = Some(exit_code);
             }

@@ -43,7 +43,7 @@ impl<'a> fmt::Display for SyscallStats<'a> {
 }
 
 pub fn build_syscall_stats<'a>(
-    data: &HashMap<Pid, PidData<'a>>,
+    data: &'a HashMap<Pid, PidData<'a>>,
 ) -> HashMap<Pid, Vec<SyscallStats<'a>>> {
     let mut syscall_stats = HashMap::default();
 
