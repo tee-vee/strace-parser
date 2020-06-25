@@ -56,15 +56,15 @@ impl<'a> PidData<'a> {
         self.split_clones.sort_by(|a, b| a.time.cmp(&b.time));
 
         let mut pairs = self.split_clones.chunks_exact(2);
-            while let Some([start, end]) = pairs.next() {
-                match (&start.other, &end.rtn_cd) {
-                    (Some(OtherFields::Clone(ProcType::Process)), Some(child_pid)) => {
-                        self.child_pids.push(*child_pid);
-                    }
-                    (Some(OtherFields::Clone(ProcType::Thread)), Some(thread_pid)) => {
-                        self.threads.push(*thread_pid);
-                    }
-                    _ => {}
+        while let Some([start, end]) = pairs.next() {
+            match (&start.other, &end.rtn_cd) {
+                (Some(OtherFields::Clone(ProcType::Process)), Some(child_pid)) => {
+                    self.child_pids.push(*child_pid);
+                }
+                (Some(OtherFields::Clone(ProcType::Thread)), Some(thread_pid)) => {
+                    self.threads.push(*thread_pid);
+                }
+                _ => {}
             }
         }
     }

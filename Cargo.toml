@@ -21,6 +21,7 @@ clap = "2.33.1"
 parser = { path = "parser" }
 
 [workspace]
+members = [ "parser" ]
 
 [[bench]]
 name = "strace_parse"

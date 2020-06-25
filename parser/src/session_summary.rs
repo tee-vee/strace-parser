@@ -95,7 +95,9 @@ impl<'a> SessionSummary<'a> {
             // Assume that these start from lowest pid, then sort the pids forked
             // during trace by start time
             SortBy::StartTime => {
-                let (mut existing, mut forked): (Vec<_>, Vec<_>) = sorted_summaries.into_iter().partition(|(_, s)| s.parent_pid.is_none());
+                let (mut existing, mut forked): (Vec<_>, Vec<_>) = sorted_summaries
+                    .into_iter()
+                    .partition(|(_, s)| s.parent_pid.is_none());
                 existing.sort_by(|(pid_x, _), (pid_y, _)| pid_x.cmp(&pid_y));
                 forked.sort_by(|(_, x), (_, y)| (x.start_time).cmp(&y.start_time));
                 existing.extend(forked);
@@ -156,7 +158,19 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        let futex_map = self.calc_futex_threads();
+        // Threads that execute execve become separate processes
+        // Do not include pids that used execve in the futex check as they
+        // may cause thread detection to treat the threads of the new child
+        // process as related to the parent
+        let exec_pids: Vec<_> = self
+            .pid_summaries
+            .iter()
+            .filter(|(_, sum)| sum.execve.is_some())
+            .map(|(pid, _)| pid)
+            .copied()
+            .collect();
+
+        let futex_map = self.calc_futex_threads(exec_pids.as_slice());
         for (pid, threads) in futex_map.into_iter() {
             if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
                 pid_summary.threads.extend(threads);
@@ -164,9 +178,13 @@ impl<'a> SessionSummary<'a> {
         }
     }
 
-    fn calc_futex_threads(&self) -> HashMap<Pid, HashSet<Pid>> {
+    fn calc_futex_threads(&self, skip_pids: &[Pid]) -> HashMap<Pid, HashSet<Pid>> {
         let mut addr_map = HashMap::new();
-        for (&pid, pid_summary) in &self.pid_summaries {
+        for (&pid, pid_summary) in self
+            .pid_summaries
+            .iter()
+            .filter(|(pid, _)| !skip_pids.contains(pid))
+        {
             for addr in &pid_summary.pvt_futex {
                 let addr_entry = addr_map.entry(addr).or_insert_with(HashSet::new);
                 addr_entry.insert(pid);
@@ -768,8 +786,11 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        let sorted: Vec<_> = summary.to_sorted(SortBy::StartTime).into_iter().map(|(p, _)| p).collect();
-        assert_eq!(sorted,
-                   &[9746, 32766, 26124, 412]);
+        let sorted: Vec<_> = summary
+            .to_sorted(SortBy::StartTime)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(sorted, &[9746, 32766, 26124, 412]);
     }
 }
