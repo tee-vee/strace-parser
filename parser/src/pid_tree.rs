@@ -53,10 +53,9 @@ pub fn print_tree(
     if done.contains(&pid) {
         return Ok(());
     }
+    done.push(pid);
 
     if let Some(pid_summary) = pid_summaries.get(&pid) {
-        done.push(pid);
-
         let mut header = String::new();
         for i in 1..print_info.indent {
             if filled_cols.contains(&i) {
@@ -136,7 +135,8 @@ pub fn print_tree(
             }
         }
 
-        let mut child_iter = pid_summary.child_pids.iter().peekable();
+        let mut child_iter = pid_summary.child_pids.difference(&pid_summary.threads).peekable();
+        //let mut child_iter = pid_summary.child_pids.iter().peekable();
         while let Some(&child) = child_iter.next() {
             let last_child = match child_iter.peek().is_none() {
                 true => Last,
