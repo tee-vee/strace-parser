@@ -166,7 +166,7 @@ where
                 }
                 "execve" => {
                     // 17840 13:43:41.449433 execve("/bin/ps", ["ps", "-o", "rss=", "-p", "17838"], 0xc0001c2000 /* 22 vars */ <unfinished ...>
-                    //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^ 
+                    //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^
                     if let Some(t) = syscall_split.next() {
                         let mut v = vec![t];
                         tokens
@@ -193,7 +193,7 @@ where
                     }
                 }
                 "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
-                    | "write" => {
+                | "write" => {
                     // 17819 13:43:41.450318 read(22<pipe:[879334396]>,  <unfinished ...>
                     //                               ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split
@@ -627,7 +627,6 @@ mod tests {
             })
         );
     }
-
 
     #[test]
     fn parser_captures_resumed_clone_thread() {

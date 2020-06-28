@@ -12,7 +12,7 @@ use std::io::{prelude::*, stdout, Error};
 
 static PRINT_COUNT: usize = 10;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SessionSummary<'a> {
     pid_summaries: HashMap<Pid, PidSummary<'a>>,
     all_time: f32,
@@ -54,16 +54,7 @@ impl<'a> SessionSummary<'a> {
             .fold_with(0.0, |acc, (_, pid_summary)| acc + pid_summary.user_time)
             .sum();
 
-        let pid_graph = summary.build_pid_graph();
-
-        for (&pid, pid_summary) in summary.pid_summaries.iter_mut() {
-            let mut parent_graph = pid_graph.neighbors_directed(pid, Incoming);
-
-            if let Some(parent) = parent_graph.next() {
-                pid_summary.parent_pid = Some(parent);
-            }
-        }
-
+        summary.populate_children();
         summary.populate_threads();
 
         summary
@@ -95,7 +86,9 @@ impl<'a> SessionSummary<'a> {
             // Assume that these start from lowest pid, then sort the pids forked
             // during trace by start time
             SortBy::StartTime => {
-                let (mut existing, mut forked): (Vec<_>, Vec<_>) = sorted_summaries.into_iter().partition(|(_, s)| s.parent_pid.is_none());
+                let (mut existing, mut forked): (Vec<_>, Vec<_>) = sorted_summaries
+                    .into_iter()
+                    .partition(|(_, s)| s.parent_pid.is_none());
                 existing.sort_by(|(pid_x, _), (pid_y, _)| pid_x.cmp(&pid_y));
                 forked.sort_by(|(_, x), (_, y)| (x.start_time).cmp(&y.start_time));
                 existing.extend(forked);
@@ -125,9 +118,8 @@ impl<'a> SessionSummary<'a> {
         sorted_summaries
     }
 
-    fn build_pid_graph(&self) -> GraphMap<Pid, Pid, Directed> {
+    fn populate_children(&mut self) {
         let mut pid_graph = DiGraphMap::new();
-
         for (&pid, pid_summary) in self.pid_summaries.iter() {
             if !pid_summary.child_pids.is_empty() {
                 for &child in &pid_summary.child_pids {
@@ -136,37 +128,104 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        pid_graph
+        for (&pid, pid_summary) in self.pid_summaries.iter_mut() {
+            let mut parent_graph = pid_graph.neighbors_directed(pid, Incoming);
+
+            if let Some(parent) = parent_graph.next() {
+                pid_summary.parent_pid = Some(parent);
+            }
+        }
     }
 
     fn populate_threads(&mut self) {
-        let mut thread_map = HashMap::new();
+        let execve_threads = self.clone_threads();
+        self.convert_execve_threads_to_children(execve_threads);
+        self.futex_threads();
+        self.mirror_threads_to_siblings();
+        self.remove_self_from_threads();
+    }
+
+    fn clone_threads(&mut self) -> HashMap<Pid, Vec<Pid>> {
+        let mut execve_threads = HashMap::new();
+        let mut thread_graph = UnGraphMap::new();
 
         for (&pid, pid_summary) in &self.pid_summaries {
             for &thread in &pid_summary.threads {
-                let thread_entry = thread_map.entry(thread).or_insert_with(Vec::new);
+
+                // Threads that execute execve are promoted to separate processes and
+                // should not treat the threads of its parent as siblings.
+                // For simplicity we assume that any threads spawned by the process
+                // that eventually uses execve occur after the exec
+                match self.pid_summaries.get(&thread).and_then(|s| s.execve.as_ref()) {
+                    Some(_) => {
+                        let pid_entry = execve_threads.entry(pid).or_insert_with(Vec::new);
+                        pid_entry.push(thread);
+                        //let thread_entry = execve_threads.entry(thread).or_insert_with(Vec::new);
+                        //thread_entry.push(pid);
+                    }
+                    _ => {
+                        thread_graph.add_edge(pid, thread, 1);
+                    }
+                }
+                if self.pid_summaries.get(&thread).and_then(|s| s.execve.as_ref()).is_none() {
+                    thread_graph.add_edge(pid, thread, 1);
+                }
+            }
+        }
+
+        let mut thread_map = HashMap::new();
+        for (&pid, pid_summary) in self.pid_summaries.iter_mut() {
+            let mut dfs = Dfs::new(&thread_graph, pid);
+            while let Some(related) = dfs.next(&thread_graph) {
+                pid_summary.threads.insert(related);
+                let thread_entry = thread_map.entry(related).or_insert_with(Vec::new);
                 thread_entry.push(pid);
-                thread_entry.extend(pid_summary.threads.iter().filter(|&&t| t != thread));
             }
         }
 
-        for (pid, threads) in thread_map.into_iter() {
-            if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
-                pid_summary.threads.extend(threads);
+        for (pid, threads) in thread_map {
+            if let Some(summary) = self.pid_summaries.get_mut(&pid) {
+                summary.threads.extend(threads);
             }
         }
 
-        let futex_map = self.calc_futex_threads();
-        for (pid, threads) in futex_map.into_iter() {
-            if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
-                pid_summary.threads.extend(threads);
+        execve_threads
+    }
+
+    fn convert_execve_threads_to_children(&mut self, execve_threads: HashMap<Pid, Vec<Pid>>) {
+        for (pid, threads) in execve_threads {
+            if let Some(summary) = self.pid_summaries.get_mut(&pid) {
+                for thread in threads {
+                    summary.threads.remove(&thread);
+                    summary.child_pids.insert(thread);
+                }
             }
         }
     }
 
-    fn calc_futex_threads(&self) -> HashMap<Pid, HashSet<Pid>> {
+    fn mirror_threads_to_siblings(&mut self) {
+        let mut symmetric_threads = HashMap::new();
+        for (&pid, summary) in &self.pid_summaries {
+            for &thread in &summary.threads {
+                let thread_entry = symmetric_threads.entry(thread).or_insert_with(Vec::new);
+                thread_entry.push(pid);
+                thread_entry.extend(summary.threads.iter().copied());
+            }
+        }
+
+        for (pid, threads) in symmetric_threads {
+            if let Some(summary) = self.pid_summaries.get_mut(&pid) {
+                summary.threads.extend(threads);
+            }
+        }
+    }
+
+    fn futex_threads(&mut self) {
         let mut addr_map = HashMap::new();
-        for (&pid, pid_summary) in &self.pid_summaries {
+
+        // Only perform the futex linking on pids that existed prior to the trace
+        // The threads of anything forked during tracing are already captured.
+        for (&pid, pid_summary) in self.pid_summaries.iter().filter(|(_, summary)| summary.parent_pid.is_none()) {
             for addr in &pid_summary.pvt_futex {
                 let addr_entry = addr_map.entry(addr).or_insert_with(HashSet::new);
                 addr_entry.insert(pid);
@@ -175,9 +234,9 @@ impl<'a> SessionSummary<'a> {
 
         let mut addr_graph: UnGraphMap<&str, i8> = UnGraphMap::new();
         for (&&addr, pids) in &addr_map {
-            for (inr_addr, inr_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
-                if !pids.is_disjoint(inr_pids) {
-                    addr_graph.add_edge(addr, inr_addr, 1);
+            for (inner_addr, inner_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
+                if !pids.is_disjoint(inner_pids) {
+                    addr_graph.add_edge(addr, inner_addr, 1);
                 }
             }
         }
@@ -189,16 +248,26 @@ impl<'a> SessionSummary<'a> {
             while let Some(relative) = dfs.next(&addr_graph) {
                 for &pid in pids.iter() {
                     let entry = thread_map.entry(pid).or_insert_with(HashSet::new);
-                    entry.extend(pids.iter().filter(|&&p| p != pid));
+                    entry.extend(pids.iter());
 
                     if let Some(more_pids) = addr_map.get(&relative) {
-                        entry.extend(more_pids.iter().filter(|&&p| p != pid));
+                        entry.extend(more_pids.iter());
                     }
                 }
             }
         }
 
-        thread_map
+        for (pid, threads) in thread_map.into_iter() {
+            if let Some(pid_summary) = self.pid_summaries.get_mut(&pid) {
+                pid_summary.threads.extend(threads);
+            }
+        }
+    }
+
+    fn remove_self_from_threads(&mut self) {
+        for (pid, threads) in self.pid_summaries.iter_mut().map(|(pid, summary)| (pid, &mut summary.threads)) {
+            threads.remove(pid);
+        }
     }
 
     pub fn related_pids(&self, pids: &[Pid]) -> Vec<Pid> {
@@ -705,12 +774,10 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        assert!(summary.pid_summaries[&1875].threads.contains(&20222));
-        assert!(summary.pid_summaries[&1875].threads.contains(&20223));
-        assert!(summary.pid_summaries[&20222].threads.contains(&1875));
-        assert!(summary.pid_summaries[&20222].threads.contains(&20223));
-        assert!(summary.pid_summaries[&20223].threads.contains(&1875));
-        assert!(summary.pid_summaries[&20223].threads.contains(&20222));
+
+        assert_eq!(vec![&20222, &20223], summary.pid_summaries[&1875].threads.iter().collect::<Vec<_>>());
+        assert_eq!(vec![&1875, &20223], summary.pid_summaries[&20222].threads.iter().collect::<Vec<_>>());
+        assert_eq!(vec![&1875, &20222], summary.pid_summaries[&20223].threads.iter().collect::<Vec<_>>());
     }
 
     #[test]
@@ -725,38 +792,65 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        let mut all_pids = BTreeSet::new();
-        all_pids.extend(&[17038, 17041, 17043, 24518, 24685]);
 
-        let isect: BTreeSet<_> = summary.pid_summaries[&17038]
-            .threads
-            .intersection(&all_pids)
-            .collect();
-        assert_eq!(isect, [17041, 17043, 24518, 24685].iter().collect());
+        assert_eq!(summary.pid_summaries[&17038].threads.iter().collect::<Vec<_>>(), vec![&17041, &17043, &24518, &24685]);
+        assert_eq!(summary.pid_summaries[&17041].threads.iter().collect::<Vec<_>>(), vec![&17038, &17043, &24518, &24685]);
+        assert_eq!(summary.pid_summaries[&17043].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &24518, &24685]);
+        assert_eq!(summary.pid_summaries[&24518].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &17043, &24685]);
+        assert_eq!(summary.pid_summaries[&24685].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &17043, &24518]);
+    }
 
-        let isect: BTreeSet<_> = summary.pid_summaries[&17041]
-            .threads
-            .intersection(&all_pids)
-            .collect();
-        assert_eq!(isect, [17038, 17043, 24518, 24685].iter().collect());
+    #[test]
+    fn pid_summary_execve_convert_thread_to_child() {
+        let input = r##"8442  02:21:10.759733 futex(0xcccee86f48, FUTEX_WAIT_PRIVATE, 3, NULL <unfinished ...>
+8357  02:21:10.760083 futex(0xc000084848, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
+8355  02:21:10.760103 futex(0x7f79a8c0d22c, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
+8346  02:21:10.760204 futex(0xc000084848, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
+8355  02:21:10.781726 futex(0xc000084848, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
+8346  02:21:12.681318 clone(child_stack=0x7ff9b45d7ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
+8346  02:21:15.002646 <... clone resumed>, parent_tid=[9154], tls=0x7ff9b4a0ea15, child_tidptr=0x7ff9b45d49d0) = 9154 <0.000078>
+9154  02:21:14.985520 execve("/opt/gitlab/embedded/service/gitaly-ruby/git-hooks/post-receive", ["/opt/gitlab/embedded/service/gitaly-ruby/git-hooks/post-receive"], 0x7f797c047ff0 /* 39 vars */ <unfinished ...>
+9154  02:21:15.002560 clone(child_stack=0x7ff9b45d7ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
+9154  02:21:15.002646 <... clone resumed>, parent_tid=[9157], tls=0x7ff9b45d8700, child_tidptr=0x7ff9b45d89d0) = 9157 <0.000078>
+9157  02:21:15.003408 clone(child_stack=0x7ff9b31d5ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
+9157  02:21:15.003498 <... clone resumed>, parent_tid=[9159], tls=0x7ff9b31d6700, child_tidptr=0x7ff9b31d69d0) = 9159 <0.000082>
+9154  02:21:15.013127 futex(0xcccee86f48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
+9159  02:21:15.026908 futex(0xcccee86f48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
-        let isect: BTreeSet<_> = summary.pid_summaries[&17043]
-            .threads
-            .intersection(&all_pids)
-            .collect();
-        assert_eq!(isect, [17038, 17041, 24518, 24685].iter().collect());
+        assert_eq!(summary.pid_summaries[&8346].child_pids.iter().collect::<Vec<_>>(), vec![&9154],);
 
-        let isect: BTreeSet<_> = summary.pid_summaries[&24518]
-            .threads
-            .intersection(&all_pids)
-            .collect();
-        assert_eq!(isect, [17038, 17041, 17043, 24685].iter().collect());
+        assert_eq!(summary.pid_summaries[&8346].threads.iter().collect::<Vec<_>>(), vec![&8355, &8357]);
+        assert_eq!(summary.pid_summaries[&8355].threads.iter().collect::<Vec<_>>(), vec![&8346, &8357]);
+        assert_eq!(summary.pid_summaries[&8357].threads.iter().collect::<Vec<_>>(), vec![&8346, &8355]);
 
-        let isect: BTreeSet<_> = summary.pid_summaries[&24685]
-            .threads
-            .intersection(&all_pids)
-            .collect();
-        assert_eq!(isect, [17038, 17041, 17043, 24518].iter().collect());
+        assert_eq!(summary.pid_summaries[&9154].child_pids.iter().collect::<Vec<_>>(), vec![&9157]);
+        assert_eq!(summary.pid_summaries[&9157].child_pids.iter().collect::<Vec<_>>(), vec![&9159]);
+
+        assert_eq!(summary.pid_summaries[&9154].threads.iter().collect::<Vec<_>>(), vec![&9157, &9159]);
+        assert_eq!(summary.pid_summaries[&9157].threads.iter().collect::<Vec<_>>(), vec![&9154, &9159]);
+        assert_eq!(summary.pid_summaries[&9159].threads.iter().collect::<Vec<_>>(), vec![&9154, &9157]);
+
+        assert!(summary.pid_summaries[&8442].threads.is_empty());
+    }
+
+    #[test]
+    fn pid_summary_futex_thread_check_excludes_children() {
+        let input = r##"2979 11:34:25.556415 futex(0x7ffa5fbf9f24, FUTEX_WAIT_PRIVATE, 27, NULL <unfinished ...>
+2989  11:34:25.557272 futex(0x7ffa5fbf9f24, FUTEX_WAIT_PRIVATE, 861, NULL <unfinished ...>
+2979  11:34:27.679833 <... vfork resumed> ) = 11608 <0.141899>
+11608 11:34:27.539786 futex(0x7ffa5fbf9f24, FUTEX_WAIT_BITSET_PRIVATE, 1, {2975525, 987165583}, ffffffff <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(&input);
+        let syscall_stats = build_syscall_stats(&pid_data_map);
+        let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
+
+        assert_eq!(summary.pid_summaries[&2979].child_pids.iter().collect::<Vec<_>>(), vec![&11608]);
+        assert_eq!(summary.pid_summaries[&11608].parent_pid, Some(2979));
+
+        assert_eq!(summary.pid_summaries[&2979].threads.iter().collect::<Vec<_>>(), vec![&2989]);
+        assert_eq!(summary.pid_summaries[&2989].threads.iter().collect::<Vec<_>>(), vec![&2979]);
     }
 
     #[test]
@@ -768,8 +862,11 @@ mod tests {
         let pid_data_map = build_syscall_data(&input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
-        let sorted: Vec<_> = summary.to_sorted(SortBy::StartTime).into_iter().map(|(p, _)| p).collect();
-        assert_eq!(sorted,
-                   &[9746, 32766, 26124, 412]);
+        let sorted: Vec<_> = summary
+            .to_sorted(SortBy::StartTime)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(sorted, &[9746, 32766, 26124, 412]);
     }
 }
