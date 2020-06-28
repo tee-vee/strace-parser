@@ -142,7 +142,7 @@ PID 17021
 
 #### pid
 
-Details of PID(s) including syscalls stats, processes executed, sibling threads, exit code, and slowest `open` and `openat` calls
+Details of PID(s) including syscalls stats, processes executed, sibling threads, exit code, and slowest `open` and `openat` calls.
 
 `strace-parser <INPUT> pid [FLAGS] <PIDS>...`
 
@@ -318,6 +318,11 @@ $ strace-parser trace.txt quantize write --pid 2993 28861 --related
 #### tree
 
 Print a `pstree` style graph of PIDs and their children. Sibling threads are surrounded by curly brackets.
+
+**Note:** For processes already running when the trace began, the parser will attempt to guess thread
+relationships using the addresses of private `futex` calls. Spurious relationships may occur rarely when
+separate processes happen to use the same address for a `futex`. This method is not used for any processes
+forked/cloned during the trace. The relationships of these will always be accurate.
 
 `strace-parser tree [FLAGS]`
 

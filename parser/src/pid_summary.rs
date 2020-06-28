@@ -31,7 +31,7 @@ lazy_static! {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PidSummary<'a> {
     pub syscall_count: i32,
     pub system_active_time: f32,
