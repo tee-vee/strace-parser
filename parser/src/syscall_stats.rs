@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SyscallStats<'a> {
     pub name: &'a str,
     pub count: i32,

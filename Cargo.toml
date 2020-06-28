@@ -1,6 +1,6 @@
 [package]
 name = "strace-parser"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["Will Chandler <wchandler@gitlab.com>"]
 edition = "2018"
 build = "build.rs"
@@ -21,6 +21,7 @@ clap = "2.33.1"
 parser = { path = "parser" }
 
 [workspace]
+members = [ "parser" ]
 
 [[bench]]
 name = "strace_parse"
