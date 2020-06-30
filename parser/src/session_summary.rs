@@ -416,24 +416,24 @@ impl<'a> SessionSummary<'a> {
             writeln!(stdout(), "PID {}\n", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
-            match (&pid_summary.execve, pid_summary.exit.is_some()) {
-                (Some(exec), true) => {
+            match (&pid_summary.execve, pid_summary.exit) {
+                (Some(exec), Some(exit)) => {
                     writeln!(stdout())?;
                     writeln!(stdout(), "{}", exec)?;
-                    writeln!(stdout(), "  Exit: {}", pid_summary.exit)?;
+                    writeln!(stdout(), "  Exit: {}", exit)?;
                     writeln!(stdout())?;
                 }
-                (Some(exec), false) => {
+                (Some(exec), None) => {
                     writeln!(stdout())?;
                     writeln!(stdout(), "{}", exec)?;
                     writeln!(stdout())?;
                 }
-                (None, true) => {
+                (None, Some(exit)) => {
                     writeln!(stdout())?;
-                    writeln!(stdout(), "  Exit: {}", pid_summary.exit)?;
+                    writeln!(stdout(), "  Exit: {}", exit)?;
                     writeln!(stdout())?;
                 }
-                (None, false) => {
+                (None, None) => {
                     if pid_summary.parent_pid.is_some()
                         || pid_summary.threads.is_empty()
                         || pid_summary.child_pids.is_empty()
@@ -467,8 +467,8 @@ impl<'a> SessionSummary<'a> {
                 if let Some(exec) = &pid_summary.execve {
                     writeln!(stdout(), "{}", exec)?;
                 }
-                if pid_summary.exit.is_some() {
-                    writeln!(stdout(), "  Exit: {}", &pid_summary.exit)?;
+                if let Some(exit) = pid_summary.exit {
+                    writeln!(stdout(), "  Exit: {}", exit)?;
                 }
                 if pid_summary.execve.is_some() || pid_summary.exit.is_some() {
                     writeln!(stdout())?;
@@ -527,7 +527,10 @@ impl<'a> SessionSummary<'a> {
                             stdout(),
                             "  {: <6}    {: >4}    {: <16}    {: <}",
                             pid,
-                            pid_summary.exit,
+                            pid_summary
+                                .exit
+                                .map(|e| e.to_string())
+                                .unwrap_or("n/a".to_string()),
                             time,
                             Execs::replace_newlines(cmd, 35)
                         )?;
