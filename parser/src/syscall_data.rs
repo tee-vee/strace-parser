@@ -4,6 +4,7 @@ use crate::Pid;
 use crate::{HashMap, HashSet};
 use rayon::prelude::*;
 use std::convert::TryFrom;
+use std::fmt;
 
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
@@ -20,6 +21,45 @@ impl<'a> SyscallData<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ExitType<'a> {
+    Exit(i32),
+    Signal(&'a str),
+    None,
+}
+
+impl<'a> Default for ExitType<'a> {
+    fn default() -> Self {
+        ExitType::None
+    }
+}
+
+impl<'a> ExitType<'a> {
+    pub fn is_none(&self) -> bool {
+        if let ExitType::None = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+}
+                
+
+impl<'a> fmt::Display for ExitType<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ExitType::*;
+        match self {
+            Exit(code) => write!(f, "{}", code),
+            Signal(sig) => write!(f, "{}", sig),
+            None => write!(f, "{}", "n/a"),
+        }
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
@@ -32,7 +72,7 @@ pub struct PidData<'a> {
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<RawExec<'a>>>,
-    pub exit_code: Option<i32>,
+    pub exit: ExitType<'a>,
 }
 
 impl<'a> PidData<'a> {
@@ -48,7 +88,7 @@ impl<'a> PidData<'a> {
             open_events: Vec::new(),
             io_events: Vec::new(),
             execve: None,
-            exit_code: None,
+            exit: ExitType::None,
         }
     }
 
@@ -144,6 +184,10 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         *error_entry += 1;
     }
 
+    if raw_data.syscall.starts_with("SIG") {
+        pid_entry.exit = ExitType::Signal(raw_data.syscall);
+    }
+
     match raw_data.syscall {
         "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
             (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
@@ -180,7 +224,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: 
         }
         "exit" | "_exit" | "exit_group" => {
             if let Some(OtherFields::Exit(exit_code)) = raw_data.other {
-                pid_entry.exit_code = Some(exit_code);
+                pid_entry.exit = ExitType::Exit(exit_code);
             }
         }
         _ => {}
@@ -240,8 +284,8 @@ fn coalesce_pid_data<'a>(
             _ => {}
         }
 
-        if temp_pid_data.exit_code.is_some() {
-            pid_entry.exit_code = temp_pid_data.exit_code;
+        if temp_pid_data.exit.is_some() {
+            pid_entry.exit = temp_pid_data.exit;
         }
     }
 }
@@ -356,7 +400,7 @@ mod tests {
     fn pid_data_captures_exit_code() {
         let input = r##"203   19:52:42.247489 exit_group(1)     = ?"##;
         let pid_data_map = build_syscall_data(&input);
-        assert_eq!(Some(1), pid_data_map[&203].exit_code);
+        assert_eq!(ExitType::Exit(1), pid_data_map[&203].exit);
     }
 
     #[test]
