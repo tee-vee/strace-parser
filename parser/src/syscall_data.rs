@@ -1,10 +1,10 @@
 use crate::parser;
-use crate::parser::{OtherFields, ProcType, RawData};
+use crate::parser::{OtherFields, ExitType, LineData, ProcType, RawData};
 use crate::Pid;
 use crate::{HashMap, HashSet};
+
 use rayon::prelude::*;
 use std::convert::TryFrom;
-use std::fmt;
 
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
@@ -21,45 +21,6 @@ impl<'a> SyscallData<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ExitType<'a> {
-    Exit(i32),
-    Signal(&'a str),
-    None,
-}
-
-impl<'a> Default for ExitType<'a> {
-    fn default() -> Self {
-        ExitType::None
-    }
-}
-
-impl<'a> ExitType<'a> {
-    pub fn is_none(&self) -> bool {
-        if let ExitType::None = self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_some(&self) -> bool {
-        !self.is_none()
-    }
-}
-                
-
-impl<'a> fmt::Display for ExitType<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ExitType::*;
-        match self {
-            Exit(code) => write!(f, "{}", code),
-            Signal(sig) => write!(f, "{}", sig),
-            None => write!(f, "{}", "n/a"),
-        }
-    }
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct PidData<'a> {
     pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
@@ -72,7 +33,7 @@ pub struct PidData<'a> {
     pub open_events: Vec<RawData<'a>>,
     pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<RawExec<'a>>>,
-    pub exit: ExitType<'a>,
+    pub exit: Option<ExitType<'a>>,
 }
 
 impl<'a> PidData<'a> {
@@ -88,7 +49,7 @@ impl<'a> PidData<'a> {
             open_events: Vec::new(),
             io_events: Vec::new(),
             execve: None,
-            exit: ExitType::None,
+            exit: None,
         }
     }
 
@@ -157,78 +118,77 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
     data_map
 }
 
-fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, raw_data: RawData<'a>) {
+fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data: LineData<'a>) {
     let pid_entry = pid_data_map
-        .entry(raw_data.pid)
+        .entry(line_data.pid())
         .or_insert_with(PidData::new);
 
-    let syscall_entry = pid_entry
-        .syscall_data
-        .entry(raw_data.syscall)
-        .or_insert_with(SyscallData::new);
+    match line_data {
+        LineData::Syscall(raw_data) => {
+            let syscall_entry = pid_entry
+                .syscall_data
+                .entry(raw_data.syscall)
+                .or_insert_with(SyscallData::new);
 
-    if let Some(duration) = raw_data.duration {
-        syscall_entry.lengths.push(duration);
-    }
-
-    if raw_data.time < pid_entry.start_time {
-        pid_entry.start_time = raw_data.time;
-    }
-
-    if raw_data.time > pid_entry.end_time {
-        pid_entry.end_time = raw_data.time;
-    }
-
-    if let Some(error) = raw_data.error {
-        let error_entry = syscall_entry.errors.entry(error).or_insert(0);
-        *error_entry += 1;
-    }
-
-    if raw_data.syscall.starts_with("SIG") {
-        pid_entry.exit = ExitType::Signal(raw_data.syscall);
-    }
-
-    match raw_data.syscall {
-        "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
-            (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
-                pid_entry.child_pids.push(child_pid as Pid)
+            if let Some(duration) = raw_data.duration {
+                syscall_entry.lengths.push(duration);
             }
-            (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
-                pid_entry.threads.push(child_pid as Pid);
-                pid_entry.child_pids.push(child_pid as Pid);
+
+            if let Some(error) = raw_data.error {
+                let error_entry = syscall_entry.errors.entry(error).or_insert(0);
+                *error_entry += 1;
             }
-            (None, Some(_)) | (Some(_), None) => {
-                pid_entry.split_clones.push(raw_data);
+
+            if raw_data.time < pid_entry.start_time {
+                pid_entry.start_time = raw_data.time;
             }
-            _ => {}
-        },
-        "execve" => {
-            if let Ok(e) = RawExec::try_from(raw_data) {
-                if let Some(execs) = &mut pid_entry.execve {
-                    execs.push(e);
-                } else {
-                    pid_entry.execve = Some(vec![e]);
+
+            if raw_data.time > pid_entry.end_time {
+                pid_entry.end_time = raw_data.time;
+            }
+
+            match raw_data.syscall {
+                "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
+                    (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
+                        pid_entry.child_pids.push(child_pid as Pid)
+                    }
+                    (Some(child_pid), Some(OtherFields::Clone(ProcType::Thread))) => {
+                        pid_entry.threads.push(child_pid as Pid);
+                        pid_entry.child_pids.push(child_pid as Pid);
+                    }
+                    (None, Some(_)) | (Some(_), None) => {
+                        pid_entry.split_clones.push(raw_data);
+                    }
+                    _ => {}
+                },
+                "execve" => {
+                    if let Ok(e) = RawExec::try_from(raw_data) {
+                        if let Some(execs) = &mut pid_entry.execve {
+                            execs.push(e);
+                        } else {
+                            pid_entry.execve = Some(vec![e]);
+                        }
+                    }
                 }
+                "futex" => {
+                    if let Some(OtherFields::Futex(addr)) = raw_data.other {
+                        pid_entry.pvt_futex.insert(addr);
+                    }
+                }
+                "open" | "openat" => {
+                    pid_entry.open_events.push(raw_data);
+                }
+                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+                    pid_entry.io_events.push(raw_data);
+                }
+                _ => {}
             }
         }
-        "futex" => {
-            if let Some(OtherFields::Futex(addr)) = raw_data.other {
-                pid_entry.pvt_futex.insert(addr);
-            }
+        LineData::Exit(exit_data) => {
+            pid_entry.exit = Some(exit_data.exit);
         }
-        "open" | "openat" => {
-            pid_entry.open_events.push(raw_data);
-        }
-        "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
-            pid_entry.io_events.push(raw_data);
-        }
-        "exit" | "_exit" | "exit_group" => {
-            if let Some(OtherFields::Exit(exit_code)) = raw_data.other {
-                pid_entry.exit = ExitType::Exit(exit_code);
-            }
-        }
-        _ => {}
     }
+
 }
 
 fn coalesce_pid_data<'a>(
@@ -398,9 +358,9 @@ mod tests {
 
     #[test]
     fn pid_data_captures_exit_code() {
-        let input = r##"203   19:52:42.247489 exit_group(1)     = ?"##;
+        let input = r##"203 01:58:06.988634 +++ exited with 1 +++"##;
         let pid_data_map = build_syscall_data(&input);
-        assert_eq!(ExitType::Exit(1), pid_data_map[&203].exit);
+        assert_eq!(Some(ExitType::Exit(1)), pid_data_map[&203].exit);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::pid_summary::PidSummary;
 use crate::HashMap;
 use crate::Pid;
+
 use std::collections::HashSet;
 use std::io;
 use std::io::prelude::*;
@@ -86,18 +87,18 @@ pub fn print_tree(
                 (false, _) => last.clone(),
             });
 
-        match (print_info.fan_out, pid_summary.exit.is_some(), exec) {
-            (FanOut::All, true, Some(cmd)) => {
-                line += format!(" - exit: {}, cmd: {}", pid_summary.exit, cmd).as_str();
+        match (print_info.fan_out, pid_summary.exit, exec) {
+            (FanOut::All, Some(exit), Some(cmd)) => {
+                line += format!(" - exit: {}, cmd: {}", exit, cmd).as_str();
             }
-            (FanOut::NoThreads, false, Some(cmd)) => {
+            (FanOut::NoThreads, None, Some(cmd)) => {
                 line += format!(" - cmd: {}", cmd).as_str();
             }
-            (_, false, Some(cmd)) => {
+            (_, None, Some(cmd)) => {
                 line += format!(" - cmd: {}", cmd).as_str();
             }
-            (FanOut::All, true, None) => {
-                line += format!(" - exit: {}", pid_summary.exit).as_str();
+            (FanOut::All, Some(exit), None) => {
+                line += format!(" - exit: {}", exit).as_str();
             }
             _ => {}
         }

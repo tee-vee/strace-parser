@@ -1,5 +1,6 @@
 use crate::exec::Execs;
-use crate::syscall_data::{ExitType, PidData};
+use crate::parser::ExitType;
+use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::time::parse_unix_timestamp;
 use crate::HashSet;
@@ -46,7 +47,7 @@ pub struct PidSummary<'a> {
     pub threads: BTreeSet<Pid>,
     pub child_pids: BTreeSet<Pid>,
     pub execve: Option<Execs>,
-    pub exit: ExitType<'a>,
+    pub exit: Option<ExitType<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

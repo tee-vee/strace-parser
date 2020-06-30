@@ -1,4 +1,5 @@
 use crate::Pid;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
@@ -12,11 +13,47 @@ pub struct RawData<'a> {
     pub other: Option<OtherFields<'a>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ExitType<'a> {
+    Exit(i32),
+    Signal(&'a str),
+}
+
+impl<'a> fmt::Display for ExitType<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ExitType::*;
+        match self {
+            Exit(code) => write!(f, "{}", code),
+            Signal(sig) => write!(f, "{}", sig),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ExitData<'a> {
+    pub pid: Pid,
+    pub exit: ExitType<'a>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LineData<'a> {
+    Syscall(RawData<'a>),
+    Exit(ExitData<'a>),
+}
+
+impl<'a> LineData<'a> {
+    pub fn pid(&self) -> Pid {
+        match self {
+            LineData::Syscall(data) => data.pid,
+            LineData::Exit(data) => data.pid,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum OtherFields<'a> {
     Clone(ProcType),
     Execve(Vec<&'a str>),
-    Exit(i32),
     File(&'a str),
     Futex(&'a str),
 }
@@ -59,12 +96,12 @@ impl<'a> RawData<'a> {
 
 const CLONE_THREAD: &str = "CLONE_THREAD";
 
-pub fn parse_line(line: &str) -> Option<RawData> {
+pub fn parse_line(line: &str) -> Option<LineData> {
     let tokens = line.split_ascii_whitespace();
     parse_tokens(tokens)
 }
 
-fn parse_tokens<'a, I>(mut tokens: I) -> Option<RawData<'a>>
+fn parse_tokens<'a, I>(mut tokens: I) -> Option<LineData<'a>>
 where
     I: DoubleEndedIterator<Item = &'a str>,
 {
@@ -100,27 +137,27 @@ where
         CallStatus::Complete
     // 90718 13:48:58.423962 +++ exited with 0 +++
     //                       ^^^
-    } else if syscall_token.starts_with('+') {
+    } else if syscall_token == "+++" {
         // 13449 01:58:23.198334 +++ killed by SIGTERM +++
         //                           ^^^^^^
         let exit_kill = tokens.next()?;
         // 13449 01:58:23.198334 +++ killed by SIGTERM +++
         //                                     ^^^^^^^
-        let signal = tokens.nth(1)?;
-        if exit_kill != "killed" {
-            return None;
-        } else {
-            return Some(RawData {
+        let signal_code = tokens.nth(1)?;
+        return match exit_kill {
+            "exited" => {
+                let code = signal_code.parse::<i32>().ok()?;
+                Some(LineData::Exit(ExitData {
+                    pid,
+                    exit: ExitType::Exit(code),
+                }))
+            }
+            "killed" => Some(LineData::Exit(ExitData {
                 pid,
-                time,
-                syscall: signal,
-                duration: None,
-                error: None,
-                rtn_cd: None,
-                call_status: CallStatus::Complete,
-                other: None,
-            });
-        }
+                exit: ExitType::Signal(signal_code),
+            })),
+            _ => None,
+        };
     } else {
         CallStatus::Started
     };
@@ -243,18 +280,6 @@ where
                         }
                     }
                 }
-                "exit" | "_exit" | "exit_group" => {
-                    // 13612 01:59:35.767337 exit_group(0)     = ?
-                    //                                  ^
-                    if let Some(exit_code) = syscall_split
-                        .next()
-                        .map(|s| s.splitn(2, ')'))
-                        .and_then(|mut s| s.next())
-                        .and_then(|code| code.parse::<i32>().ok())
-                    {
-                        other = Some(OtherFields::Exit(exit_code));
-                    }
-                }
                 _ => {}
             }
         }
@@ -297,7 +322,7 @@ where
         }
     }
 
-    Some(RawData {
+    Some(LineData::Syscall(RawData {
         pid,
         time,
         syscall,
@@ -306,7 +331,7 @@ where
         rtn_cd,
         call_status,
         other,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -330,7 +355,7 @@ mod tests {
         let input = r##" 16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
@@ -339,7 +364,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
-            })
+            }))
         );
     }
 
@@ -354,7 +379,7 @@ mod tests {
         let input = r##"24009 09:07:12.773648 brk(NULL)         = 0x137e000 <0.000011>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 24009,
                 time: "09:07:12.773648",
                 syscall: "brk",
@@ -363,13 +388,13 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: None,
-            })
+            }))
         );
     }
 
     #[test]
     fn parser_returns_none_non_alpha_syscall() {
-        let input = r##"90718 13:48:58.423962 +++ exited with 0 +++"##;
+        let input = r##"90718 13:48:58.423962 $!@*+-"##;
         assert_eq!(parse_line(input), None);
     }
 
@@ -378,7 +403,7 @@ mod tests {
         let input = r##"16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000aaa>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
@@ -387,7 +412,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
-            })
+            }))
         );
     }
 
@@ -396,7 +421,7 @@ mod tests {
         let input = r##"16747 11:29:49.112721 open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 3</dev/null> <0.000030>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16747,
                 time: "11:29:49.112721",
                 syscall: "open",
@@ -405,7 +430,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
-            })
+            }))
         );
     }
 
@@ -414,7 +439,7 @@ mod tests {
         let input = r##"16747 11:29:49.113885 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe42085c9d0) = 23aa <0.000118>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16747,
                 time: "11:29:49.113885",
                 syscall: "clone",
@@ -423,7 +448,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
@@ -432,7 +457,7 @@ mod tests {
         let input = r##"16747 11:29:49.113885 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe42085c9d0) = 23151 <0.000118>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16747,
                 time: "11:29:49.113885",
                 syscall: "clone",
@@ -441,7 +466,7 @@ mod tests {
                 rtn_cd: Some(23151),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
@@ -450,7 +475,7 @@ mod tests {
         let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <0.000229>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 13656,
                 time: "10:53:02.442246",
                 syscall: "execve",
@@ -463,7 +488,7 @@ mod tests {
                     "[\"sleep\",",
                     "\"1\"],",
                 ])),
-            })
+            }))
         );
     }
 
@@ -472,7 +497,7 @@ mod tests {
         let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) <unfinished ...>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 13656,
                 time: "10:53:02.442246",
                 syscall: "execve",
@@ -485,7 +510,7 @@ mod tests {
                     "[\"sleep\",",
                     "\"1\"],",
                 ])),
-            })
+            }))
         );
     }
 
@@ -495,7 +520,7 @@ mod tests {
             r##"27820 20:26:33.949452 futex(0x535c890, FUTEX_WAKE_PRIVATE, 1) = 0 <0.000087>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 27820,
                 time: "20:26:33.949452",
                 syscall: "futex",
@@ -504,7 +529,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Futex("0x535c890")),
-            })
+            }))
         );
     }
 
@@ -513,7 +538,7 @@ mod tests {
         let input = r##"11638 11:34:25.556415 futex(0x7ffa50080ff4, FUTEX_WAIT_PRIVATE, 27, NULL <unfinished ...>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 11638,
                 time: "11:34:25.556415",
                 syscall: "futex",
@@ -522,7 +547,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: Some(OtherFields::Futex("0x7ffa50080ff4"))
-            })
+            }))
         );
     }
 
@@ -531,7 +556,7 @@ mod tests {
         let input = r##"2965  11:34:25.561897 futex(0x38e1c80, FUTEX_WAKE, 1) = 0 <0.000025>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 2965,
                 time: "11:34:25.561897",
                 syscall: "futex",
@@ -540,7 +565,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: None,
-            })
+            }))
         );
     }
 
@@ -550,7 +575,7 @@ mod tests {
             r##"23740 11:34:25.556284 futex(0xc420061548, FUTEX_WAIT, 0, NULL <unfinished ...>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 23740,
                 time: "11:34:25.556284",
                 syscall: "futex",
@@ -559,7 +584,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: None,
-            })
+            }))
         );
     }
 
@@ -568,7 +593,7 @@ mod tests {
         let input = r##"98252 03:48:28.335770 clone(child_stack=0x7f202ac6bf70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f202ac6c9d0, tls=0x7f202ac6c700, child_tidptr=0x7f202ac6c9d0) = 98253 <0.000038>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 98252,
                 time: "03:48:28.335770",
                 syscall: "clone",
@@ -577,7 +602,7 @@ mod tests {
                 rtn_cd: Some(98253),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Thread)),
-            })
+            }))
         );
     }
 
@@ -586,7 +611,7 @@ mod tests {
         let input = r##"98245 03:48:28.282463 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fc502200a50) = 98246 <0.000068>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 98245,
                 time: "03:48:28.282463",
                 syscall: "clone",
@@ -595,7 +620,7 @@ mod tests {
                 rtn_cd: Some(98246),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
@@ -604,7 +629,7 @@ mod tests {
         let input = r##"16093 04:37:37.662748 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 16093,
                 time: "04:37:37.662748",
                 syscall: "clone",
@@ -613,7 +638,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
@@ -622,7 +647,7 @@ mod tests {
         let input = r##"17826 13:43:48.972999 <... clone resumed>) = 17905 <0.008941>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 17826,
                 time: "13:43:48.972999",
                 syscall: "clone",
@@ -631,7 +656,7 @@ mod tests {
                 rtn_cd: Some(17905),
                 call_status: CallStatus::Resumed,
                 other: None,
-            })
+            }))
         );
     }
 
@@ -640,7 +665,7 @@ mod tests {
         let input = r##"17821 13:43:39.901584 <... clone resumed>, parent_tid=[17825], tls=0x7f1c6df50700, child_tidptr=0x7f1c6df509d0) = 17825 <0.000064>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 17821,
                 time: "13:43:39.901584",
                 syscall: "clone",
@@ -649,7 +674,7 @@ mod tests {
                 rtn_cd: Some(17825),
                 call_status: CallStatus::Resumed,
                 other: None,
-            })
+            }))
         );
     }
 
@@ -658,7 +683,7 @@ mod tests {
         let input = r##"111462 08:55:58.704022 <... clone resumed> child_stack=0x7f001bffdfb0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f001bffe9d0, tls=0x7f001bffe700, child_tidptr=0x7f001bffe9d0) = 103674 <0.000060>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 111462,
                 time: "08:55:58.704022",
                 syscall: "clone",
@@ -667,7 +692,7 @@ mod tests {
                 rtn_cd: Some(103674),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Thread)),
-            })
+            }))
         );
     }
 
@@ -676,7 +701,7 @@ mod tests {
         let input = r##"98781 10:30:46.143570 <... clone resumed> child_stack=0, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 56089 <0.004605>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 98781,
                 time: "10:30:46.143570",
                 syscall: "clone",
@@ -685,7 +710,7 @@ mod tests {
                 rtn_cd: Some(56089),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
@@ -694,7 +719,7 @@ mod tests {
         let input = r##"2974  11:34:28.581144 <... vfork resumed> ) = 27367 <0.123110>"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Syscall(RawData {
                 pid: 2974,
                 time: "11:34:28.581144",
                 syscall: "vfork",
@@ -703,43 +728,31 @@ mod tests {
                 rtn_cd: Some(27367),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
-            })
+            }))
         );
     }
 
     #[test]
     fn parser_captures_zero_exit_code() {
-        let input = r##"27367 11:34:28.799598 _exit(0)     = ?"##;
+        let input = r##"13513 01:58:50.823625 +++ exited with 0 +++"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
-                pid: 27367,
-                time: "11:34:28.799598",
-                syscall: "_exit",
-                duration: None,
-                error: None,
-                rtn_cd: None,
-                call_status: CallStatus::Started,
-                other: Some(OtherFields::Exit(0)),
-            })
+            Some(LineData::Exit(ExitData {
+                pid: 13513,
+                exit: ExitType::Exit(0),
+            }))
         );
     }
 
     #[test]
     fn parser_captures_nonzero_exit_code() {
-        let input = r##"18442 14:43:39.709211 exit_group(128 <unfinished ...>"##;
+        let input = r##"13454 01:58:23.149393 +++ exited with 128 +++"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
-                pid: 18442,
-                time: "14:43:39.709211",
-                syscall: "exit_group",
-                duration: None,
-                error: None,
-                rtn_cd: None,
-                call_status: CallStatus::Started,
-                other: Some(OtherFields::Exit(128)),
-            })
+            Some(LineData::Exit(ExitData {
+                pid: 13454,
+                exit: ExitType::Exit(128),
+            }))
         );
     }
 
@@ -748,16 +761,10 @@ mod tests {
         let input = r##"13350 01:58:19.443720 +++ killed by SIGTERM +++"##;
         assert_eq!(
             parse_line(input),
-            Some(RawData {
+            Some(LineData::Exit(ExitData {
                 pid: 13350,
-                time: "01:58:19.443720",
-                syscall: "SIGTERM",
-                duration: None,
-                error: None,
-                rtn_cd: None,
-                call_status: CallStatus::Complete,
-                other: None,
-            })
+                exit: ExitType::Signal("SIGTERM"),
+            }))
         );
     }
 }
