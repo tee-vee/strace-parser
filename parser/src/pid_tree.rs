@@ -86,18 +86,18 @@ pub fn print_tree(
                 (false, _) => last.clone(),
             });
 
-        match (print_info.fan_out, pid_summary.exit_code, exec) {
-            (FanOut::All, Some(exit), Some(cmd)) => {
-                line += format!(" - exit: {}, cmd: {}", exit, cmd).as_str();
+        match (print_info.fan_out, pid_summary.exit.is_some(), exec) {
+            (FanOut::All, true, Some(cmd)) => {
+                line += format!(" - exit: {}, cmd: {}", pid_summary.exit, cmd).as_str();
             }
-            (FanOut::NoThreads, None, Some(cmd)) => {
+            (FanOut::NoThreads, false, Some(cmd)) => {
                 line += format!(" - cmd: {}", cmd).as_str();
             }
-            (_, None, Some(cmd)) => {
+            (_, false, Some(cmd)) => {
                 line += format!(" - cmd: {}", cmd).as_str();
             }
-            (FanOut::All, Some(exit), None) => {
-                line += format!(" - exit: {}", exit).as_str();
+            (FanOut::All, true, None) => {
+                line += format!(" - exit: {}", pid_summary.exit).as_str();
             }
             _ => {}
         }
@@ -118,9 +118,12 @@ pub fn print_tree(
             while let Some(&thread) = thread_iter.next() {
                 let last_thread = match (
                     thread_iter.peek().is_none(),
-                    pid_summary.child_pids.is_empty(),
+                    pid_summary
+                        .child_pids
+                        .difference(&pid_summary.threads)
+                        .count(),
                 ) {
-                    (true, true) => Last,
+                    (true, 0) => Last,
                     _ => NotLast,
                 };
 
@@ -135,8 +138,10 @@ pub fn print_tree(
             }
         }
 
-        let mut child_iter = pid_summary.child_pids.difference(&pid_summary.threads).peekable();
-        //let mut child_iter = pid_summary.child_pids.iter().peekable();
+        let mut child_iter = pid_summary
+            .child_pids
+            .difference(&pid_summary.threads)
+            .peekable();
         while let Some(&child) = child_iter.next() {
             let last_child = match child_iter.peek().is_none() {
                 true => Last,

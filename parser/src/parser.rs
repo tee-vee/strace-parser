@@ -94,8 +94,33 @@ where
     //                       ^^^^
     let call_status = if syscall_token.starts_with('<') {
         CallStatus::Resumed
+    // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
+    //                                                     ^^^^^^^^^^
     } else if duration_token.starts_with('<') {
         CallStatus::Complete
+    // 90718 13:48:58.423962 +++ exited with 0 +++
+    //                       ^^^
+    } else if syscall_token.starts_with('+') {
+        // 13449 01:58:23.198334 +++ killed by SIGTERM +++
+        //                           ^^^^^^
+        let exit_kill = tokens.next()?;
+        // 13449 01:58:23.198334 +++ killed by SIGTERM +++
+        //                                     ^^^^^^^
+        let signal = tokens.nth(1)?;
+        if exit_kill != "killed" {
+            return None;
+        } else {
+            return Some(RawData {
+                pid,
+                time,
+                syscall: signal,
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Complete,
+                other: None,
+            });
+        }
     } else {
         CallStatus::Started
     };
@@ -344,7 +369,7 @@ mod tests {
 
     #[test]
     fn parser_returns_none_non_alpha_syscall() {
-        let input = r##"27183 11:34:25.959907 +++ killed by SIGTERM +++"##;
+        let input = r##"90718 13:48:58.423962 +++ exited with 0 +++"##;
         assert_eq!(parse_line(input), None);
     }
 
@@ -714,6 +739,24 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: Some(OtherFields::Exit(128)),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_captures_signal_exit() {
+        let input = r##"13350 01:58:19.443720 +++ killed by SIGTERM +++"##;
+        assert_eq!(
+            parse_line(input),
+            Some(RawData {
+                pid: 13350,
+                time: "01:58:19.443720",
+                syscall: "SIGTERM",
+                duration: None,
+                error: None,
+                rtn_cd: None,
+                call_status: CallStatus::Complete,
+                other: None,
             })
         );
     }

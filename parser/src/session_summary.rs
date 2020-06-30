@@ -151,12 +151,15 @@ impl<'a> SessionSummary<'a> {
 
         for (&pid, pid_summary) in &self.pid_summaries {
             for &thread in &pid_summary.threads {
-
                 // Threads that execute execve are promoted to separate processes and
                 // should not treat the threads of its parent as siblings.
                 // For simplicity we assume that any threads spawned by the process
                 // that eventually uses execve occur after the exec
-                match self.pid_summaries.get(&thread).and_then(|s| s.execve.as_ref()) {
+                match self
+                    .pid_summaries
+                    .get(&thread)
+                    .and_then(|s| s.execve.as_ref())
+                {
                     Some(_) => {
                         let pid_entry = execve_threads.entry(pid).or_insert_with(Vec::new);
                         pid_entry.push(thread);
@@ -167,7 +170,12 @@ impl<'a> SessionSummary<'a> {
                         thread_graph.add_edge(pid, thread, 1);
                     }
                 }
-                if self.pid_summaries.get(&thread).and_then(|s| s.execve.as_ref()).is_none() {
+                if self
+                    .pid_summaries
+                    .get(&thread)
+                    .and_then(|s| s.execve.as_ref())
+                    .is_none()
+                {
                     thread_graph.add_edge(pid, thread, 1);
                 }
             }
@@ -225,7 +233,11 @@ impl<'a> SessionSummary<'a> {
 
         // Only perform the futex linking on pids that existed prior to the trace
         // The threads of anything forked during tracing are already captured.
-        for (&pid, pid_summary) in self.pid_summaries.iter().filter(|(_, summary)| summary.parent_pid.is_none()) {
+        for (&pid, pid_summary) in self
+            .pid_summaries
+            .iter()
+            .filter(|(_, summary)| summary.parent_pid.is_none())
+        {
             for addr in &pid_summary.pvt_futex {
                 let addr_entry = addr_map.entry(addr).or_insert_with(HashSet::new);
                 addr_entry.insert(pid);
@@ -265,7 +277,11 @@ impl<'a> SessionSummary<'a> {
     }
 
     fn remove_self_from_threads(&mut self) {
-        for (pid, threads) in self.pid_summaries.iter_mut().map(|(pid, summary)| (pid, &mut summary.threads)) {
+        for (pid, threads) in self
+            .pid_summaries
+            .iter_mut()
+            .map(|(pid, summary)| (pid, &mut summary.threads))
+        {
             threads.remove(pid);
         }
     }
@@ -400,28 +416,28 @@ impl<'a> SessionSummary<'a> {
             writeln!(stdout(), "PID {}\n", pid)?;
             writeln!(stdout(), "{}  ---------------", pid_summary)?;
 
-            match (&pid_summary.execve, &pid_summary.exit_code) {
-                (Some(exec), Some(exit)) => {
+            match (&pid_summary.execve, pid_summary.exit.is_some()) {
+                (Some(exec), true) => {
                     writeln!(stdout())?;
                     writeln!(stdout(), "{}", exec)?;
-                    writeln!(stdout(), "  Exit code: {}", exit)?;
+                    writeln!(stdout(), "  Exit: {}", pid_summary.exit)?;
                     writeln!(stdout())?;
                 }
-                (Some(exec), None) => {
+                (Some(exec), false) => {
                     writeln!(stdout())?;
                     writeln!(stdout(), "{}", exec)?;
                     writeln!(stdout())?;
                 }
-                (None, Some(exit)) => {
+                (None, true) => {
                     writeln!(stdout())?;
-                    writeln!(stdout(), "  Exit code: {}", exit)?;
+                    writeln!(stdout(), "  Exit: {}", pid_summary.exit)?;
                     writeln!(stdout())?;
                 }
-                (None, None) => {
+                (None, false) => {
                     if pid_summary.parent_pid.is_some()
                         || pid_summary.threads.is_empty()
                         || pid_summary.child_pids.is_empty()
-                        || pid_summary.exit_code.is_none()
+                        || pid_summary.exit.is_none()
                     {
                         writeln!(stdout())?;
                     }
@@ -451,10 +467,10 @@ impl<'a> SessionSummary<'a> {
                 if let Some(exec) = &pid_summary.execve {
                     writeln!(stdout(), "{}", exec)?;
                 }
-                if let Some(exit) = &pid_summary.exit_code {
-                    writeln!(stdout(), "  Exit code: {}", exit)?;
+                if pid_summary.exit.is_some() {
+                    writeln!(stdout(), "  Exit: {}", &pid_summary.exit)?;
                 }
-                if pid_summary.execve.is_some() || pid_summary.exit_code.is_some() {
+                if pid_summary.execve.is_some() || pid_summary.exit.is_some() {
                     writeln!(stdout())?;
                 }
 
@@ -506,17 +522,12 @@ impl<'a> SessionSummary<'a> {
         for pid in pids_to_print.iter() {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
                 if let Some(exec) = &pid_summary.execve {
-                    let exit = match pid_summary.exit_code {
-                        Some(e) => e.to_string(),
-                        None => "n/a".to_string(),
-                    };
-
                     for (cmd, time) in exec.iter() {
                         writeln!(
                             stdout(),
                             "  {: <6}    {: >4}    {: <16}    {: <}",
                             pid,
-                            exit,
+                            pid_summary.exit,
                             time,
                             Execs::replace_newlines(cmd, 35)
                         )?;
@@ -775,9 +786,27 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
-        assert_eq!(vec![&20222, &20223], summary.pid_summaries[&1875].threads.iter().collect::<Vec<_>>());
-        assert_eq!(vec![&1875, &20223], summary.pid_summaries[&20222].threads.iter().collect::<Vec<_>>());
-        assert_eq!(vec![&1875, &20222], summary.pid_summaries[&20223].threads.iter().collect::<Vec<_>>());
+        assert_eq!(
+            vec![&20222, &20223],
+            summary.pid_summaries[&1875]
+                .threads
+                .iter()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![&1875, &20223],
+            summary.pid_summaries[&20222]
+                .threads
+                .iter()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![&1875, &20222],
+            summary.pid_summaries[&20223]
+                .threads
+                .iter()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -793,11 +822,41 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
-        assert_eq!(summary.pid_summaries[&17038].threads.iter().collect::<Vec<_>>(), vec![&17041, &17043, &24518, &24685]);
-        assert_eq!(summary.pid_summaries[&17041].threads.iter().collect::<Vec<_>>(), vec![&17038, &17043, &24518, &24685]);
-        assert_eq!(summary.pid_summaries[&17043].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &24518, &24685]);
-        assert_eq!(summary.pid_summaries[&24518].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &17043, &24685]);
-        assert_eq!(summary.pid_summaries[&24685].threads.iter().collect::<Vec<_>>(), vec![&17038, &17041, &17043, &24518]);
+        assert_eq!(
+            summary.pid_summaries[&17038]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&17041, &17043, &24518, &24685]
+        );
+        assert_eq!(
+            summary.pid_summaries[&17041]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&17038, &17043, &24518, &24685]
+        );
+        assert_eq!(
+            summary.pid_summaries[&17043]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&17038, &17041, &24518, &24685]
+        );
+        assert_eq!(
+            summary.pid_summaries[&24518]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&17038, &17041, &17043, &24685]
+        );
+        assert_eq!(
+            summary.pid_summaries[&24685]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&17038, &17041, &17043, &24518]
+        );
     }
 
     #[test]
@@ -820,18 +879,72 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
-        assert_eq!(summary.pid_summaries[&8346].child_pids.iter().collect::<Vec<_>>(), vec![&9154],);
+        assert_eq!(
+            summary.pid_summaries[&8346]
+                .child_pids
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9154],
+        );
 
-        assert_eq!(summary.pid_summaries[&8346].threads.iter().collect::<Vec<_>>(), vec![&8355, &8357]);
-        assert_eq!(summary.pid_summaries[&8355].threads.iter().collect::<Vec<_>>(), vec![&8346, &8357]);
-        assert_eq!(summary.pid_summaries[&8357].threads.iter().collect::<Vec<_>>(), vec![&8346, &8355]);
+        assert_eq!(
+            summary.pid_summaries[&8346]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&8355, &8357]
+        );
+        assert_eq!(
+            summary.pid_summaries[&8355]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&8346, &8357]
+        );
+        assert_eq!(
+            summary.pid_summaries[&8357]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&8346, &8355]
+        );
 
-        assert_eq!(summary.pid_summaries[&9154].child_pids.iter().collect::<Vec<_>>(), vec![&9157]);
-        assert_eq!(summary.pid_summaries[&9157].child_pids.iter().collect::<Vec<_>>(), vec![&9159]);
+        assert_eq!(
+            summary.pid_summaries[&9154]
+                .child_pids
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9157]
+        );
+        assert_eq!(
+            summary.pid_summaries[&9157]
+                .child_pids
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9159]
+        );
 
-        assert_eq!(summary.pid_summaries[&9154].threads.iter().collect::<Vec<_>>(), vec![&9157, &9159]);
-        assert_eq!(summary.pid_summaries[&9157].threads.iter().collect::<Vec<_>>(), vec![&9154, &9159]);
-        assert_eq!(summary.pid_summaries[&9159].threads.iter().collect::<Vec<_>>(), vec![&9154, &9157]);
+        assert_eq!(
+            summary.pid_summaries[&9154]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9157, &9159]
+        );
+        assert_eq!(
+            summary.pid_summaries[&9157]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9154, &9159]
+        );
+        assert_eq!(
+            summary.pid_summaries[&9159]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&9154, &9157]
+        );
 
         assert!(summary.pid_summaries[&8442].threads.is_empty());
     }
@@ -846,11 +959,29 @@ mod tests {
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
-        assert_eq!(summary.pid_summaries[&2979].child_pids.iter().collect::<Vec<_>>(), vec![&11608]);
+        assert_eq!(
+            summary.pid_summaries[&2979]
+                .child_pids
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&11608]
+        );
         assert_eq!(summary.pid_summaries[&11608].parent_pid, Some(2979));
 
-        assert_eq!(summary.pid_summaries[&2979].threads.iter().collect::<Vec<_>>(), vec![&2989]);
-        assert_eq!(summary.pid_summaries[&2989].threads.iter().collect::<Vec<_>>(), vec![&2979]);
+        assert_eq!(
+            summary.pid_summaries[&2979]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&2989]
+        );
+        assert_eq!(
+            summary.pid_summaries[&2989]
+                .threads
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![&2979]
+        );
     }
 
     #[test]
