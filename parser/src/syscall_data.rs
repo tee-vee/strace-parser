@@ -119,8 +119,9 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
 }
 
 fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data: LineData<'a>) {
+    let pid = line_data.pid();
     let pid_entry = pid_data_map
-        .entry(line_data.pid())
+        .entry(pid)
         .or_insert_with(PidData::new);
 
     match line_data {
@@ -161,6 +162,13 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
                     }
                     _ => {}
                 },
+                "getpid" => {
+                    if let Some(tgid) = raw_data.rtn_cd {
+                        if tgid as Pid != pid {
+                            pid_entry.threads.push(tgid as Pid);
+                        }
+                    }
+                }
                 "execve" => {
                     if let Ok(e) = RawExec::try_from(raw_data) {
                         if let Some(execs) = &mut pid_entry.execve {

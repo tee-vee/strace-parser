@@ -314,8 +314,10 @@ where
             //                                                                          ^
             if end_tokens.peek().is_none() {
                 match syscall {
-                    "clone" | "fork" | "vfork" | "read" | "recv" | "recvfrom" | "recvmsg"
-                    | "send" | "sendmsg" | "sendto" | "write" => rtn_cd = token.parse::<i32>().ok(),
+                    "clone" | "fork" | "getpid" | "vfork" | "read" | "recv" | "recvfrom"
+                    | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+                        rtn_cd = token.parse::<i32>().ok()
+                    }
                     _ => {}
                 }
             }
