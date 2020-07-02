@@ -34,6 +34,17 @@ impl<'a> SessionSummary<'a> {
             );
         }
 
+        for proc_d in pid_data.values().map(|v| &v.proc_data).flatten() {
+            if let Some(sum) = summary.pid_summaries.get_mut(&proc_d.tgid) {
+                sum.proc_name = Some(proc_d.proc_name);
+            }
+            if proc_d.tgid != proc_d.pid {
+                if let Some(sum) = summary.pid_summaries.get_mut(&proc_d.pid) {
+                    sum.threads.insert(proc_d.tgid);
+                }
+            }
+        }
+
         summary.all_time = summary
             .pid_summaries
             .par_iter()

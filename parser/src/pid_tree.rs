@@ -87,17 +87,25 @@ pub fn print_tree(
                 (false, _) => last.clone(),
             });
 
-        match (print_info.fan_out, pid_summary.exit, exec) {
-            (FanOut::All, Some(exit), Some(cmd)) => {
+        match (
+            print_info.fan_out,
+            pid_summary.exit,
+            exec,
+            pid_summary.proc_name,
+        ) {
+            (FanOut::All, Some(exit), Some(cmd), _) => {
                 line += format!(" - exit: {}, cmd: {}", exit, cmd).as_str();
             }
-            (FanOut::NoThreads, None, Some(cmd)) => {
+            (FanOut::All, None, Some(cmd), _) => {
                 line += format!(" - cmd: {}", cmd).as_str();
             }
-            (_, None, Some(cmd)) => {
-                line += format!(" - cmd: {}", cmd).as_str();
+            (FanOut::All, None, None, Some(name)) => {
+                line += format!(" - cmd: {}", name).as_str();
             }
-            (FanOut::All, Some(exit), None) => {
+            (FanOut::All, Some(exit), None, Some(name)) => {
+                line += format!(" - exit: {}, cmd: {}", exit, name).as_str();
+            }
+            (_, Some(exit), None, None) => {
                 line += format!(" - exit: {}", exit).as_str();
             }
             _ => {}

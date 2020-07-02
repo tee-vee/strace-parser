@@ -11,6 +11,7 @@ pub struct RawData<'a> {
     pub rtn_cd: Option<i32>,
     pub call_status: CallStatus,
     pub other: Option<OtherFields<'a>>,
+    pub proc_data: Option<Box<ProcData<'a>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,6 +70,13 @@ pub enum CallStatus {
 pub enum ProcType {
     Thread,
     Process,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ProcData<'a> {
+    pub proc_name: &'a str,
+    pub tgid: Pid,
+    pub pid: Pid,
 }
 
 impl<'a> RawData<'a> {
@@ -164,6 +172,7 @@ where
 
     let syscall;
     let mut other = None;
+    let mut proc_data = None;
 
     match call_status {
         CallStatus::Resumed => {
@@ -193,6 +202,9 @@ where
                     }
                 }
                 "fork" | "vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
+                "read" => {
+                    proc_data = parse_proc_data(&mut tokens, call_status);
+                }
                 _ => {}
             }
         }
@@ -264,6 +276,9 @@ where
                     {
                         other = Some(OtherFields::File(f));
                     }
+                    if syscall == "read" {
+                        proc_data = parse_proc_data(&mut tokens, call_status);
+                    }
                 }
                 // Only set other when call is complete as new pid is not available on started
                 "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
@@ -333,6 +348,61 @@ where
         rtn_cd,
         call_status,
         other,
+        proc_data,
+    }))
+}
+
+fn parse_proc_data<'a, I>(tokens: &mut I, call_status: CallStatus) -> Option<Box<ProcData<'a>>>
+where
+    I: DoubleEndedIterator<Item = &'a str>,
+{
+    let name_text = match call_status {
+        CallStatus::Complete => {
+            // 28952 01:47:50.683092 read(76</proc/301/status>, "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\PPid:\t299n
+            //                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            tokens.next()?
+        }
+        CallStatus::Resumed => {
+            // 28957 01:48:55.172240 <... read resumed> "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\PPid:\t299n
+            //                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            tokens.nth(1)?
+        }
+        _ => {
+            return None;
+        }
+    };
+
+    // 28957 01:48:55.172240 <... read resumed> "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\PPid:\t299n
+    //                                                  ^^^^^^
+    let proc_name = name_text
+        .splitn(2, r##"Name:\t"##)
+        .nth(1)
+        .and_then(|n| n.splitn(2, r##"\n"##).next())?;
+
+    // 28957 01:48:55.172240 <... read resumed> "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\PPid:\t299n
+    //                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    let tgid_text = tokens.next()?;
+
+    // 28957 01:48:55.172240 <... read resumed> "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\nPPid:\t299
+    //                                                                                                     ^^^
+    let tgid_str = tgid_text
+        .splitn(2, r##"Tgid:\t"##)
+        .nth(1)
+        .and_then(|t| t.splitn(2, r##"\n"##).next())?;
+    let tgid = tgid_str.parse::<Pid>().ok()?;
+
+    // 28957 01:48:55.172240 <... read resumed> "Name:\tbundle\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t301\nNgid:\t0\nPid:\t301\nPPid:\t299
+    //                                                                                                                          ^^^
+    let pid_str = tgid_text
+        .splitn(2, r##"Tgid:\t"##)
+        .nth(1)
+        .and_then(|t| t.splitn(2, r##"\n"##).next())?;
+    let pid = pid_str.parse::<Pid>().ok()?;
+
+    Some(Box::new(ProcData {
+        proc_name,
+        tgid,
+        pid,
     }))
 }
 
@@ -366,6 +436,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
+                proc_data: None,
             }))
         );
     }
@@ -390,6 +461,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: None,
+                proc_data: None,
             }))
         );
     }
@@ -414,6 +486,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
+                proc_data: None,
             }))
         );
     }
@@ -432,6 +505,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::File("/dev/null")),
+                proc_data: None,
             }))
         );
     }
@@ -450,6 +524,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -468,6 +543,7 @@ mod tests {
                 rtn_cd: Some(23151),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -490,6 +566,7 @@ mod tests {
                     "[\"sleep\",",
                     "\"1\"],",
                 ])),
+                proc_data: None,
             }))
         );
     }
@@ -512,6 +589,7 @@ mod tests {
                     "[\"sleep\",",
                     "\"1\"],",
                 ])),
+                proc_data: None,
             }))
         );
     }
@@ -531,6 +609,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Futex("0x535c890")),
+                proc_data: None,
             }))
         );
     }
@@ -548,7 +627,8 @@ mod tests {
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Started,
-                other: Some(OtherFields::Futex("0x7ffa50080ff4"))
+                other: Some(OtherFields::Futex("0x7ffa50080ff4")),
+                proc_data: None,
             }))
         );
     }
@@ -567,6 +647,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: None,
+                proc_data: None,
             }))
         );
     }
@@ -586,6 +667,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: None,
+                proc_data: None,
             }))
         );
     }
@@ -604,6 +686,7 @@ mod tests {
                 rtn_cd: Some(98253),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Thread)),
+                proc_data: None,
             }))
         );
     }
@@ -622,6 +705,7 @@ mod tests {
                 rtn_cd: Some(98246),
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -640,6 +724,7 @@ mod tests {
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -658,6 +743,7 @@ mod tests {
                 rtn_cd: Some(17905),
                 call_status: CallStatus::Resumed,
                 other: None,
+                proc_data: None,
             }))
         );
     }
@@ -676,6 +762,7 @@ mod tests {
                 rtn_cd: Some(17825),
                 call_status: CallStatus::Resumed,
                 other: None,
+                proc_data: None,
             }))
         );
     }
@@ -694,6 +781,7 @@ mod tests {
                 rtn_cd: Some(103674),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Thread)),
+                proc_data: None,
             }))
         );
     }
@@ -712,6 +800,7 @@ mod tests {
                 rtn_cd: Some(56089),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -730,6 +819,7 @@ mod tests {
                 rtn_cd: Some(27367),
                 call_status: CallStatus::Resumed,
                 other: Some(OtherFields::Clone(ProcType::Process)),
+                proc_data: None,
             }))
         );
     }
@@ -766,6 +856,52 @@ mod tests {
             Some(LineData::Exit(ExitData {
                 pid: 13350,
                 exit: ExitType::Signal("SIGTERM"),
+            }))
+        );
+    }
+
+    #[test]
+    fn parser_captures_details_of_proc_status_resumed() {
+        let input = r##"12672 01:57:50.750779 <... read resumed> "Name:\tgitaly\nState:\tS (sleeping)\nTgid:\t10707\nNgid:\t0\nPid:\t10707\nPPid:\t24667\nTracerPid:\t12389\nUid:\t998\t998\t998\t998\nGid:\t998\t998\t998\t998\nFDSize:\t256\nGroups:\t998 \nNStgid:\t10707\nNSpid:\t10707\nNSpgid:\t10707\nNSsid:\t10707\nVmPeak:\t  499740 kB\nVmSize:\t  499740 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t   27928 kB\nVmRSS:\t   27928 kB\nVmData:\t  480544 kB\nVmStk:\t     132 kB\nVmExe:\t    5856 kB\nVmLib:\t    2040 kB\nVmPTE:\t     164 kB\nVmPMD:\t      20 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nThreads:\t14\nSigQ:\t0/62793\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\tfffffffe3bfa3a00\nSigIgn:\t0000000000000000\nSigCgt:\tffffffffffc1feff\nCapInh:\t0000000000000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t0000003fffffffff\nCapAmb:\t0000000000000000\nSeccomp:\t0\nSpeculation_Store_Bypass:\tvulnerable\nCpus_allowed:\t3\nCpus_allowed_list:\t0-1\nMems_allowed:\t00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t115\nnonvoluntary_ctxt_switches:\t75\n", 1024) = 967 <0.000039>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(LineData::Syscall(RawData {
+                pid: 12672,
+                time: "01:57:50.750779",
+                syscall: "read",
+                duration: Some(0.000039),
+                error: None,
+                rtn_cd: Some(967),
+                call_status: CallStatus::Resumed,
+                other: None,
+                proc_data: Some(Box::new(ProcData {
+                    proc_name: "gitaly",
+                    tgid: 10707,
+                    pid: 10707
+                })),
+            }))
+        );
+    }
+
+    #[test]
+    fn parser_captures_details_of_proc_status_complete() {
+        let input = r##"12672 01:57:50.727115 read(6</proc/1337/status>, "Name:\tiscsid\nState:\tS (sleeping)\nTgid:\t1337\nNgid:\t0\nPid:\t1337\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t64\nGroups:\t\nNStgid:\t1337\nNSpid:\t1337\nNSpgid:\t1337\nNSsid:\t1337\nVmPeak:\t    5220 kB\nVmSize:\t    5220 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t     148 kB\nVmRSS:\t     112 kB\nVmData:\t     272 kB\nVmStk:\t     132 kB\nVmExe:\t     480 kB\nVmLib:\t    1944 kB\nVmPTE:\t      32 kB\nVmPMD:\t      12 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nThreads:\t1\nSigQ:\t1/15735\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000000004400\nCapInh:\t0000000000000000\nCapPrm:\t0000003fffffffff\nCapEff:\t0000003fffffffff\nCapBnd:\t0000003fffffffff\nCapAmb:\t0000000000000000\nSeccomp:\t0\nSpeculation_Store_Bypass:\tvulnerable\nCpus_allowed:\t3\nCpus_allowed_list:\t0-1\nMems_allowed:\t00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t3443751\nnonvoluntary_ctxt_switches:\t789\n", 1024) = 936 <0.000023>"##;
+        assert_eq!(
+            parse_line(input),
+            Some(LineData::Syscall(RawData {
+                pid: 12672,
+                time: "01:57:50.727115",
+                syscall: "read",
+                duration: Some(0.000023),
+                error: None,
+                rtn_cd: Some(936),
+                call_status: CallStatus::Complete,
+                other: Some(OtherFields::File("/proc/1337/status")),
+                proc_data: Some(Box::new(ProcData {
+                    proc_name: "iscsid",
+                    tgid: 1337,
+                    pid: 1337
+                })),
             }))
         );
     }

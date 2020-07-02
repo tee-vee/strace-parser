@@ -1,10 +1,11 @@
 use crate::parser;
-use crate::parser::{OtherFields, ExitType, LineData, ProcType, RawData};
+use crate::parser::{ExitType, LineData, OtherFields, ProcData, ProcType, RawData};
 use crate::Pid;
 use crate::{HashMap, HashSet};
 
 use rayon::prelude::*;
 use std::convert::TryFrom;
+use std::mem;
 
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
@@ -34,6 +35,7 @@ pub struct PidData<'a> {
     pub io_events: Vec<RawData<'a>>,
     pub execve: Option<Vec<RawExec<'a>>>,
     pub exit: Option<ExitType<'a>>,
+    pub proc_data: Vec<ProcData<'a>>,
 }
 
 impl<'a> PidData<'a> {
@@ -50,6 +52,7 @@ impl<'a> PidData<'a> {
             io_events: Vec::new(),
             execve: None,
             exit: None,
+            proc_data: Vec::new(),
         }
     }
 
@@ -120,12 +123,10 @@ pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
 
 fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data: LineData<'a>) {
     let pid = line_data.pid();
-    let pid_entry = pid_data_map
-        .entry(pid)
-        .or_insert_with(PidData::new);
+    let pid_entry = pid_data_map.entry(pid).or_insert_with(PidData::new);
 
     match line_data {
-        LineData::Syscall(raw_data) => {
+        LineData::Syscall(mut raw_data) => {
             let syscall_entry = pid_entry
                 .syscall_data
                 .entry(raw_data.syscall)
@@ -146,6 +147,11 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
 
             if raw_data.time > pid_entry.end_time {
                 pid_entry.end_time = raw_data.time;
+            }
+
+            let proc_data = mem::take(&mut raw_data.proc_data);
+            if let Some(proc) = proc_data {
+                pid_entry.proc_data.push(*proc);
             }
 
             match raw_data.syscall {
@@ -186,7 +192,8 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
                 "open" | "openat" => {
                     pid_entry.open_events.push(raw_data);
                 }
-                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
+                | "write" => {
                     pid_entry.io_events.push(raw_data);
                 }
                 _ => {}
@@ -196,7 +203,6 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
             pid_entry.exit = Some(exit_data.exit);
         }
     }
-
 }
 
 fn coalesce_pid_data<'a>(
@@ -241,6 +247,8 @@ fn coalesce_pid_data<'a>(
         pid_entry.open_events.extend(temp_pid_data.open_events);
 
         pid_entry.io_events.extend(temp_pid_data.io_events);
+
+        pid_entry.proc_data.extend(temp_pid_data.proc_data);
 
         match (pid_entry.execve.as_mut(), temp_pid_data.execve) {
             (Some(pid_exec), Some(temp_exec)) => {
@@ -382,6 +390,20 @@ mod tests {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>()[..1]
+        );
+    }
+
+    #[test]
+    fn pid_data_captures_proc_status() {
+        let input = r##"20345 15:17:04.437186 <... read resumed> "Name:\tkworker/9:2H\nState:\tS (sleeping)\nTgid:\t64448\nNgid:\t0\nPid:\t64448\nPPid:\t2\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t64\nGroups:\t\nThreads:\t1\nSigQ:\t1/63292\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\tffffffffffffffff\nSigCgt:\t0000000000000000\nCapInh:\t0000000000000000\nCapPrm:\t0000001fffffffff\nCapEff:\t0000001fffffffff\nCapBnd:\t0000001fffffffff\nCapAmb:\t0000000000000000\nSeccomp:\t0\nCpus_allowed:\t00000000,00000200\nCpus_allowed_list:\t9\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t35471\nnonvoluntary_ctxt_switches:\t0\n", 2048) = 860 <0.000049>"##;
+        let pid_data_map = build_syscall_data(&input);
+        assert_eq!(
+            &[ProcData {
+                proc_name: "kworker/9:2H",
+                tgid: 64448,
+                pid: 64448
+            }],
+            pid_data_map[&20345].proc_data.as_slice()
         );
     }
 }

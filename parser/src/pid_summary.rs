@@ -48,6 +48,7 @@ pub struct PidSummary<'a> {
     pub child_pids: BTreeSet<Pid>,
     pub execve: Option<Execs>,
     pub exit: Option<ExitType<'a>>,
+    pub proc_name: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +59,9 @@ pub enum PrintAmt {
 
 impl<'a> fmt::Display for PidSummary<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(name) = self.proc_name {
+            writeln!(f, "  process: {}", name)?;
+        }
         writeln!(
             f,
             "  {} syscalls, active time: {:.3}ms, user time: {:.3}ms, total time: {:.3}ms",
@@ -134,6 +138,7 @@ impl<'a> From<(&[SyscallStats<'a>], &PidData<'a>)> for PidSummary<'a> {
             child_pids: pid_data.child_pids.iter().cloned().collect(),
             execve,
             exit: pid_data.exit,
+            proc_name: None, // populated from proc/status where available
         }
     }
 }
