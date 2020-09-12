@@ -19,10 +19,10 @@ the start of the trace this will always be accurate. On existing processes some 
 The parser checks for `futex` calls with a `*_PRIVATE` flag that share an `uaddr`; if these do not occur the
 parser cannot relate the processes.
 
-**NOTE**: `strace` must be run with the at least the `-tt -T -f` flags for
+**NOTE**: `strace` must be run with the at least the `-tt -T -f -o <FILE>` flags for
 required data to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
-I recommend using `strace -fttTyyy -s 1024` as default flags.
+I recommend using `strace -fttTyyy -s 1024 -o <FILE>` as default flags.
 
 ## Building from Source
 
