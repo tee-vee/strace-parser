@@ -4,6 +4,7 @@ use self::pid_summary::PidSummary;
 use self::sort_by::{SortBy, SortEventsBy};
 
 pub mod exec;
+pub mod directories;
 pub mod file_data;
 pub mod histogram;
 pub mod io_data;
