@@ -23,6 +23,7 @@ enum SubCmd {
     Details,
     Exec,
     Files,
+    Directories,
     Io,
     List,
     Quantize,
@@ -86,6 +87,15 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .unwrap_or(SortEventsBy::Time);
             session_summary.print_opened_files(&pids_to_print, &syscall_data, sort_by)
         }
+        SubCmd::Directories => {
+            let pids_to_print = select_pids(&args, &session_summary)?;
+            let sort_by = args
+                .value_of("sort_by")
+                .unwrap_or_default()
+                .parse::<SortEventsBy>()
+                .unwrap_or(SortEventsBy::Time);
+            session_summary.print_opened_directories(&pids_to_print, &syscall_data, sort_by)
+        }
         SubCmd::Exec => {
             let mut pids_to_print = select_pids(&args, &session_summary)?;
             pids_to_print.sort();
@@ -138,6 +148,7 @@ fn parse_subcmd<'a>(app_matches: &'a ArgMatches<'a>) -> (SubCmd, &'a ArgMatches<
         ("pid", Some(args)) => (SubCmd::Details, args),
         ("exec", Some(args)) => (SubCmd::Exec, args),
         ("files", Some(args)) => (SubCmd::Files, args),
+        ("directories", Some(args)) => (SubCmd::Directories, args),
         ("io", Some(args)) => (SubCmd::Io, args),
         ("quantize", Some(args)) => (SubCmd::Quantize, args),
         ("list-pids", Some(args)) => (SubCmd::List, args),

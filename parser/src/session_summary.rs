@@ -3,6 +3,7 @@ use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
 use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
+use crate::{directories, directories::SortDirectoriesBy};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
 use chrono::Duration;
 use petgraph::prelude::*;
@@ -590,6 +591,59 @@ impl<'a> SessionSummary<'a> {
 
         for event in open_events {
             writeln!(stdout(), "  {: >7}    {}", event.pid, event,)?;
+        }
+
+        writeln!(stdout())?;
+
+        Ok(())
+    }
+
+    pub fn print_opened_directories(
+        &self,
+        pids_to_print: &[Pid],
+        raw_data: &HashMap<Pid, PidData<'a>>,
+        sort_by: SortEventsBy,
+    ) -> Result<(), Error> {
+        let open_calls = directories::directories_opened(&pids_to_print, raw_data, SortDirectoriesBy::Time);
+
+        writeln!(stdout(), "\nDirectories accessed for files")?;
+        writeln!(
+            stdout(),
+            "\n  {: >7}    {: >10}    {: ^15}    {: <30}",
+            "pid",
+            "dur (ms)",
+            "timestamp",
+            "directory name"
+        )?;
+        writeln!(
+            stdout(),
+            "  -------    ----------    ---------------    ---------------"
+        )?;
+
+        let mut open_events: Vec<_> = pids_to_print
+            .iter()
+            .filter_map(|pid| open_calls.get(pid))
+            .flatten()
+            .collect();
+
+        match sort_by {
+            SortEventsBy::Duration => {
+                open_events.par_sort_by(|(_, x), (_, y)| {
+                    (y.duration)
+                        .partial_cmp(&x.duration)
+                        .expect("Invalid comparison on io durations")
+                });
+            }
+            SortEventsBy::Pid => {
+                open_events.par_sort_by(|(_, x), (_, y)| (x.pid).cmp(&y.pid));
+            }
+            SortEventsBy::Time => {
+                open_events.par_sort_by(|(_, x), (_, y)| (x.time).cmp(y.time));
+            }
+        }
+
+        for (fullpath, dir) in open_events {
+            writeln!(stdout(), "  {: >7}    {}    {: <30}", dir.pid, dir, fullpath)?;
         }
 
         writeln!(stdout())?;

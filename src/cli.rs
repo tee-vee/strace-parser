@@ -79,6 +79,43 @@ pub fn cli_args() -> App<'static, 'static> {
                     .help("Include sibling threads of <PIDS> in results")
                     .requires("pid"),
         ))
+        .subcommand(SubCommand::with_name("directories")
+            .about("List total duration of 'open' and 'openat' calls performed in a directory and its children")
+            .arg(
+                Arg::with_name("pid")
+                    .short("p")
+                    .long("pid")
+                    .help("PID(s) to analyze")
+                    .takes_value(true)
+                    .value_name("PIDS")
+                    .multiple(true)
+                    .validator(validate_pid),
+            )
+            .arg( Arg::with_name("related")
+                    .short("r")
+                    .long("related")
+                    .help("Include parent and child PIDs of <PIDS> in results")
+                    .requires("pid"),
+            )
+            .arg(
+                Arg::with_name("sort_by")
+                    .short("s")
+                    .long("sort")
+                    .help("Field to sort results by")
+                    .takes_value(true)
+                    .value_name("SORT_BY")
+                    .possible_values(&[
+                        "duration",
+                        "pid",
+                        "time",
+                    ]),
+            ).arg(
+                Arg::with_name("threads")
+                    .short("t")
+                    .long("threads")
+                    .help("Include sibling threads of <PIDS> in results")
+                    .requires("pid"),
+        ))
         .subcommand(SubCommand::with_name("io")
             .about("Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write")
             .arg(
