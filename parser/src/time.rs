@@ -1,17 +1,26 @@
+use bstr::ByteSlice;
 use chrono::{Duration, NaiveDateTime, NaiveTime};
 
-pub fn parse_elapsed_real_time(buffer: &str) -> Option<Duration> {
+pub fn parse_elapsed_real_time(buffer: &[u8]) -> Option<Duration> {
     let start_token = buffer
         .lines()
         .next()
-        .map(|line| line.split_whitespace())
-        .and_then(|mut split| split.nth(1));
+        .and_then(|line| line.fields().skip(1).next())
+        .and_then(|s| s.to_str().ok());
 
-    let end_token = buffer
-        .lines()
-        .next_back()
-        .map(|line| line.split_whitespace())
-        .and_then(|mut split| split.nth(1));
+    let end_token = {
+        // Skip the first newline which is the last character in the file
+        if let Some(last_line_idx) = buffer.rfind_iter("\n").skip(1).next() {
+            let last_line = &buffer[last_line_idx..];
+            last_line
+                .fields()
+                .skip(1)
+                .next()
+                .and_then(|s| s.to_str().ok())
+        } else {
+            None
+        }
+    };
 
     match (start_token, end_token) {
         (Some(start), Some(end)) => {

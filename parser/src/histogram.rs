@@ -153,12 +153,11 @@ mod tests {
 
     #[test]
     fn histogram_handles_empty_pids() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(
             build_distribution("open", &Vec::new(), &pid_data_map),
             BTreeMap::new()
@@ -167,24 +166,22 @@ mod tests {
 
     #[test]
     fn histogram_finds_max_pow_2() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <0.000100>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##;
+        let pid_data_map = build_syscall_data(input);
         let dist = build_distribution("fcntl", &vec![477], &pid_data_map);
         assert_eq!(dist.keys().last(), Some(&10));
     }
 
     #[test]
     fn histogram_fills_empty_pows() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <0.000100>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##;
+        let pid_data_map = build_syscall_data(input);
         let dist = build_distribution("fcntl", &vec![477], &pid_data_map);
         assert_eq!(dist.get(&9), Some(&0));
     }

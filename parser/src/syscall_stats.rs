@@ -109,24 +109,22 @@ mod tests {
 
     #[test]
     fn syscall_stats_name_correct() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         assert_eq!(pid_stats[&477][0].name, "fcntl");
     }
 
     #[test]
     fn syscall_stats_count_correct() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].count, 4);
@@ -134,12 +132,11 @@ mod tests {
 
     #[test]
     fn syscall_stats_max_correct() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].max, 1500.0);
@@ -147,12 +144,11 @@ mod tests {
 
     #[test]
     fn syscall_stats_min_correct() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].min, 500.0);
@@ -160,12 +156,11 @@ mod tests {
 
     #[test]
     fn syscall_stats_avg_correct() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].avg, 1000.0);
@@ -173,9 +168,8 @@ mod tests {
 
     #[test]
     fn syscall_stats_errors_correct() {
-        let input = r##"477   00:09:57.959706 wait4(-1, 0x7ffe09dbae50, WNOHANG, NULL) = -1 ECHILD (No child processes) <0.000014>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"477   00:09:57.959706 wait4(-1, 0x7ffe09dbae50, WNOHANG, NULL) = -1 ECHILD (No child processes) <0.000014>"##;
+        let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
         assert_eq!(syscall_stats[0].errors["ECHILD"], 1);
