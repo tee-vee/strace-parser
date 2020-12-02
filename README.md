@@ -187,6 +187,37 @@ PID 28912
 
 ---
 
+#### directory
+
+List sums of durations of `open` and `openat` calls in directories and their child directories.
+
+`strace-parser <INPUT> io [FLAGS] [OPTIONS]`
+
+**Options**:
+   * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
+   * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
+      * `duration`
+      * `pid`
+      * `time`
+
+**Flags**:
+   * `-r, --related` - Include parent and child PIDs of <PIDS> in results
+   * `-t, --threads` - Include sibling threads of <PIDS> in results
+
+```
+Directories accessed for files
+
+      pid      dur (ms)       timestamp       directory name
+  -------    ----------    ---------------    ---------------
+    12392         0.015    01:57:37.917644    /opt/gitlab/embedded/lib/tls
+    12392         0.041    01:57:37.917806    /opt/gitlab/embedded/lib
+    12392         0.047    01:57:37.920448    /lib
+    12392         0.162    01:57:37.924743    /opt
+    12392         0.162    01:57:37.924743    /opt/gitlab
+```
+
+---
+
 #### exec
 
 Print a list of all programs executed in session via `execve`
