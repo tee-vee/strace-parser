@@ -650,7 +650,7 @@ impl<'a> SessionSummary<'a> {
                 "  {: >7}    {}    {: <30}",
                 dir.pid,
                 dir,
-                fullpath,
+                fullpath.display(),
             )?;
         }
 
