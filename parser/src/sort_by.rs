@@ -45,6 +45,7 @@ impl FromStr for SortBy {
 
 #[derive(Clone, Copy)]
 pub enum SortEventsBy {
+    Count,
     Duration,
     Pid,
     Time,
@@ -53,6 +54,7 @@ pub enum SortEventsBy {
 impl fmt::Display for SortEventsBy {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            SortEventsBy::Count => write!(f, "Count"),
             SortEventsBy::Duration => write!(f, "Duration"),
             SortEventsBy::Pid => write!(f, "PID #"),
             SortEventsBy::Time => write!(f, "Time"),
@@ -65,6 +67,7 @@ impl FromStr for SortEventsBy {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "count" => Ok(SortEventsBy::Count),
             "duration" => Ok(SortEventsBy::Duration),
             "pid" => Ok(SortEventsBy::Pid),
             "time" => Ok(SortEventsBy::Time),

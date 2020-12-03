@@ -585,7 +585,7 @@ impl<'a> SessionSummary<'a> {
             SortEventsBy::Pid => {
                 open_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
             }
-            SortEventsBy::Time => {
+            SortEventsBy::Time | SortEventsBy::Count => {
                 open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
             }
         }
@@ -611,15 +611,17 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nDirectories accessed for files")?;
         writeln!(
             stdout(),
-            "\n  {: >7}    {: >10}    {: ^15}    {: <30}",
+            "\n  {: >7}    {: >10}    {: ^15}    {: ^15}    {: >10}    {: <30}",
             "pid",
             "dur (ms)",
-            "timestamp",
+            "first time",
+            "last time",
+            "open ct",
             "directory name"
         )?;
         writeln!(
             stdout(),
-            "  -------    ----------    ---------------    ---------------"
+            "  -------    ----------    ---------------    ---------------    ----------    --------------"
         )?;
 
         let mut open_events: Vec<_> = pids_to_print
@@ -629,6 +631,9 @@ impl<'a> SessionSummary<'a> {
             .collect();
 
         match sort_by {
+            SortEventsBy::Count => {
+                open_events.par_sort_by(|(_, x), (_, y)| (y.ct).cmp(&x.ct));
+            }
             SortEventsBy::Duration => {
                 open_events.par_sort_by(|(_, x), (_, y)| {
                     (y.duration)
@@ -640,7 +645,7 @@ impl<'a> SessionSummary<'a> {
                 open_events.par_sort_by(|(_, x), (_, y)| (x.pid).cmp(&y.pid));
             }
             SortEventsBy::Time => {
-                open_events.par_sort_by(|(_, x), (_, y)| (x.time).cmp(y.time));
+                open_events.par_sort_by(|(_, x), (_, y)| (x.start_time).cmp(y.start_time));
             }
         }
 
@@ -701,7 +706,7 @@ impl<'a> SessionSummary<'a> {
             SortEventsBy::Pid => {
                 io_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
             }
-            SortEventsBy::Time => {
+            SortEventsBy::Time | SortEventsBy::Count => {
                 io_events.par_sort_by(|x, y| (x.time).cmp(y.time));
             }
         }

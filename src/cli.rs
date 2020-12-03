@@ -105,6 +105,7 @@ pub fn cli_args() -> App<'static, 'static> {
                     .takes_value(true)
                     .value_name("SORT_BY")
                     .possible_values(&[
+                        "count",
                         "duration",
                         "pid",
                         "time",
