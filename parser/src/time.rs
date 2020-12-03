@@ -5,18 +5,13 @@ pub fn parse_elapsed_real_time(buffer: &[u8]) -> Option<Duration> {
     let start_token = buffer
         .lines()
         .next()
-        .and_then(|line| line.fields().skip(1).next())
-        .and_then(|s| s.to_str().ok());
+        .and_then(|line| line.fields().skip(1).next());
 
     let end_token = {
         // Skip the first newline which is the last character in the file
         if let Some(last_line_idx) = buffer.rfind_iter("\n").skip(1).next() {
             let last_line = &buffer[last_line_idx..];
-            last_line
-                .fields()
-                .skip(1)
-                .next()
-                .and_then(|s| s.to_str().ok())
+            last_line.fields().skip(1).next()
         } else {
             None
         }
@@ -25,7 +20,8 @@ pub fn parse_elapsed_real_time(buffer: &[u8]) -> Option<Duration> {
     match (start_token, end_token) {
         (Some(start), Some(end)) => {
             let start_time;
-            if let Ok(t) = NaiveTime::parse_from_str(start, "%H:%M:%S%.6f") {
+            if let Ok(t) = NaiveTime::parse_from_str(start.to_str_lossy().as_ref(), "%H:%M:%S%.6f")
+            {
                 start_time = Some(t);
             } else if let Some(t) = parse_unix_timestamp(start) {
                 start_time = Some(t.time());
@@ -34,7 +30,7 @@ pub fn parse_elapsed_real_time(buffer: &[u8]) -> Option<Duration> {
             }
 
             let end_time;
-            if let Ok(t) = NaiveTime::parse_from_str(end, "%H:%M:%S%.6f") {
+            if let Ok(t) = NaiveTime::parse_from_str(end.to_str_lossy().as_ref(), "%H:%M:%S%.6f") {
                 end_time = Some(t);
             } else if let Some(t) = parse_unix_timestamp(end) {
                 end_time = Some(t.time());
@@ -50,7 +46,8 @@ pub fn parse_elapsed_real_time(buffer: &[u8]) -> Option<Duration> {
     }
 }
 
-pub fn parse_unix_timestamp(time: &str) -> Option<NaiveDateTime> {
+pub fn parse_unix_timestamp(time_bytes: &[u8]) -> Option<NaiveDateTime> {
+    let time = time_bytes.to_str_lossy().to_string();
     let mut split_iter = time.split('.');
 
     let secs = match split_iter.next().and_then(|s| s.parse::<i64>().ok()) {

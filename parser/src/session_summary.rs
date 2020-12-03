@@ -5,6 +5,7 @@ use crate::syscall_stats::SyscallStats;
 use crate::{directories, directories::SortDirectoriesBy};
 use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
+
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -245,7 +246,7 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        let mut addr_graph: UnGraphMap<&str, i8> = UnGraphMap::new();
+        let mut addr_graph: UnGraphMap<&[u8], i8> = UnGraphMap::new();
         for (&&addr, pids) in &addr_map {
             for (inner_addr, inner_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
                 if !pids.is_disjoint(inner_pids) {
@@ -649,7 +650,7 @@ impl<'a> SessionSummary<'a> {
                 "  {: >7}    {}    {: <30}",
                 dir.pid,
                 dir,
-                fullpath
+                fullpath,
             )?;
         }
 

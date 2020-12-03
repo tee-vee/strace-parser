@@ -22,7 +22,7 @@ pub fn correct_strace_flags(line: &str) -> Result<bool, Error> {
     let iso_time_ok =
         NaiveTime::parse_from_str(time_str, "%H:%M:%S%.6f").is_ok() && time_str.contains('.');
     let unix_time_ok = time_str.chars().next().filter(|c| *c != '0').is_some()
-        && time::parse_unix_timestamp(time_str).is_some();
+        && time::parse_unix_timestamp(time_str.as_bytes()).is_some();
     let time = iso_time_ok || unix_time_ok;
 
     let duration = tokens.next_back().filter(|s| s.ends_with('>')).is_some();

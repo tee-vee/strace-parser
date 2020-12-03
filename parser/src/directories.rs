@@ -1,6 +1,8 @@
 use crate::file_data;
 use crate::syscall_data::PidData;
 use crate::{HashMap, Pid};
+
+use bstr::ByteSlice;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,20 +10,16 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq)]
 pub struct DirectoryData<'a> {
     pub pid: Pid,
-    pub time: &'a str,
+    pub time: &'a [u8],
     pub duration: f32,
 }
 
 impl<'a> DirectoryData<'a> {
-    fn new(
-        pid: Pid,
-        time: &'a str,
-        duration: f32,
-    ) -> DirectoryData<'a> {
+    fn new(pid: Pid, time: &'a [u8], duration: f32) -> DirectoryData<'a> {
         DirectoryData {
             pid,
             time,
-            duration
+            duration,
         }
     }
 }
@@ -31,7 +29,8 @@ impl<'a> fmt::Display for DirectoryData<'a> {
         write!(
             f,
             "{: >10.3}    {: ^15}",
-            self.duration, self.time
+            self.duration,
+            self.time.to_str_lossy()
         )
     }
 }
@@ -53,9 +52,10 @@ pub fn directories_opened<'a>(
             let mut directory_data = BTreeMap::new();
 
             file_calls.get(pid).map(|files| {
-                for file in files {
+                for file_entry in files {
                     // We split the full path into a vector of directory names
-                    let mut directories: Vec<&str> = file.file.split("/").collect();
+                    let file = file_entry.file.to_str_lossy().to_owned();
+                    let mut directories: Vec<_> = file.split("/").collect();
 
                     // Then remove the last segment which is the filename
                     directories.pop();
@@ -71,15 +71,16 @@ pub fn directories_opened<'a>(
                         // Store a map based on the full path to this directory
                         // .time is set to the latest file to read from it
                         // .duration is accumulative from all files read from inside it
-                        directory_data.entry(path)
+                        directory_data
+                            .entry(path)
                             .and_modify(|entry: &mut DirectoryData| {
-                                entry.time = file.time;
-                                entry.duration += file.duration;
+                                entry.time = file_entry.time;
+                                entry.duration += file_entry.duration;
                             })
                             .or_insert(DirectoryData::new(
-                                file.pid,
-                                file.time,
-                                file.duration,
+                                file_entry.pid,
+                                file_entry.time,
+                                file_entry.duration,
                             ));
                     }
                 }

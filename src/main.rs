@@ -106,7 +106,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
         SubCmd::Quantize => {
             let pids_to_print = select_pids(&args, &session_summary)?;
             let syscall = args.value_of("syscall").unwrap_or_default();
-            histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
+            histogram::print_histogram(syscall.as_bytes(), &pids_to_print, &syscall_data)
         }
         SubCmd::List => {
             let count_to_print = if let Some(count) = args.value_of("count") {

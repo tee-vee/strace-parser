@@ -5,6 +5,8 @@ use crate::syscall_stats::SyscallStats;
 use crate::time::parse_unix_timestamp;
 use crate::HashSet;
 use crate::Pid;
+
+use bstr::ByteSlice;
 use chrono::NaiveTime;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -13,21 +15,21 @@ use std::fmt;
 use std::io::{prelude::*, stdout, Error};
 
 lazy_static! {
-    static ref WAIT_SYSCALLS: HashSet<&'static str> = {
+    static ref WAIT_SYSCALLS: HashSet<&'static [u8]> = {
         let mut s = HashSet::default();
-        s.insert("epoll_ctl");
-        s.insert("epoll_wait");
-        s.insert("epoll_pwait");
-        s.insert("futex");
-        s.insert("nanosleep");
-        s.insert("restart_syscall");
-        s.insert("poll");
-        s.insert("ppoll");
-        s.insert("pselect");
-        s.insert("pselect6");
-        s.insert("select");
-        s.insert("wait4");
-        s.insert("waitid");
+        s.insert(b"epoll_ctl".as_ref());
+        s.insert(b"epoll_wait");
+        s.insert(b"epoll_pwait");
+        s.insert(b"futex");
+        s.insert(b"nanosleep");
+        s.insert(b"restart_syscall");
+        s.insert(b"poll");
+        s.insert(b"ppoll");
+        s.insert(b"pselect");
+        s.insert(b"pselect6");
+        s.insert(b"select");
+        s.insert(b"wait4");
+        s.insert(b"waitid");
         s
     };
 }
@@ -39,10 +41,10 @@ pub struct PidSummary<'a> {
     pub system_wait_time: f32,
     pub user_time: f32,
     pub total_time: f32,
-    pub start_time: &'a str,
-    pub end_time: &'a str,
+    pub start_time: &'a [u8],
+    pub end_time: &'a [u8],
     pub syscall_stats: Vec<SyscallStats<'a>>,
-    pub pvt_futex: HashSet<&'a str>,
+    pub pvt_futex: HashSet<&'a [u8]>,
     pub parent_pid: Option<Pid>,
     pub threads: BTreeSet<Pid>,
     pub child_pids: BTreeSet<Pid>,
@@ -66,7 +68,8 @@ impl<'a> fmt::Display for PidSummary<'a> {
         writeln!(
             f,
             "  start time: {}    end time: {}\n",
-            self.start_time, self.end_time
+            self.start_time.to_str_lossy(),
+            self.end_time.to_str_lossy()
         )?;
         writeln!(
             f,
@@ -195,9 +198,9 @@ impl<'a> PidSummary<'a> {
         Ok(())
     }
 
-    fn calc_total_time(start: &str, end: &str, active_time: f32, wait_time: f32) -> f32 {
-        let st = NaiveTime::parse_from_str(start, "%H:%M:%S%.6f");
-        let et = NaiveTime::parse_from_str(end, "%H:%M:%S%.6f");
+    fn calc_total_time(start: &[u8], end: &[u8], active_time: f32, wait_time: f32) -> f32 {
+        let st = NaiveTime::parse_from_str(start.to_str_lossy().as_ref(), "%H:%M:%S%.6f");
+        let et = NaiveTime::parse_from_str(end.to_str_lossy().as_ref(), "%H:%M:%S%.6f");
 
         let timestamp_time = if let (Some(s), Some(e)) = (st.ok(), et.ok()) {
             (e - s).num_microseconds().unwrap() as f32 / 1000.0

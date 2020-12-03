@@ -6,10 +6,10 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawData<'a> {
     pub pid: Pid,
-    pub time: &'a str,
-    pub syscall: &'a str,
+    pub time: &'a [u8],
+    pub syscall: &'a [u8],
     pub duration: Option<f32>,
-    pub error: Option<&'a str>,
+    pub error: Option<&'a [u8]>,
     pub rtn_cd: Option<i32>,
     pub call_status: CallStatus,
     pub other: Option<OtherFields<'a>>,
@@ -18,7 +18,7 @@ pub struct RawData<'a> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ExitType<'a> {
     Exit(i32),
-    Signal(&'a str),
+    Signal(&'a [u8]),
 }
 
 impl<'a> fmt::Display for ExitType<'a> {
@@ -26,7 +26,7 @@ impl<'a> fmt::Display for ExitType<'a> {
         use ExitType::*;
         match self {
             Exit(code) => write!(f, "{}", code),
-            Signal(sig) => write!(f, "{}", sig),
+            Signal(sig) => write!(f, "{}", sig.to_str_lossy()),
         }
     }
 }
@@ -55,9 +55,9 @@ impl<'a> LineData<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum OtherFields<'a> {
     Clone(ProcType),
-    Execve(Vec<&'a str>),
-    File(&'a str),
-    Futex(&'a str),
+    Execve(Vec<&'a [u8]>),
+    File(&'a [u8]),
+    Futex(&'a [u8]),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,14 +74,14 @@ pub enum ProcType {
 }
 
 impl<'a> RawData<'a> {
-    pub fn file(&self) -> Option<&'a str> {
+    pub fn file(&self) -> Option<&'a [u8]> {
         match self.other {
             Some(OtherFields::File(f)) => Some(f),
             _ => None,
         }
     }
 
-    pub fn execve(&self) -> Option<&[&'a str]> {
+    pub fn execve(&self) -> Option<&[&'a [u8]]> {
         match &self.other {
             Some(OtherFields::Execve(v)) => Some(v),
             _ => None,
@@ -117,16 +117,13 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
 
     // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
     //       ^^^^^^^^^^^^^^^
-    let time = tokens
-        .next()
-        .filter(|time_token| {
-            time_token
-                .chars()
-                .next()
-                .filter(|c| c.is_ascii_digit())
-                .is_some()
-        })
-        .and_then(|s| s.to_str().ok())?;
+    let time = tokens.next().filter(|time_token| {
+        time_token
+            .chars()
+            .next()
+            .filter(|c| c.is_ascii_digit())
+            .is_some()
+    })?;
 
     // 17819 13:43:39.888658 brk(NULL)         = 0x3213000 <0.000019>
     //                                                     ^^^^^^^^^^
@@ -164,13 +161,10 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
                     exit: ExitType::Exit(code),
                 }))
             }
-            b"killed" => {
-                let code = signal_code.to_str().ok()?;
-                Some(LineData::Exit(ExitData {
-                    pid,
-                    exit: ExitType::Signal(code),
-                }))
-            }
+            b"killed" => Some(LineData::Exit(ExitData {
+                pid,
+                exit: ExitType::Signal(signal_code),
+            })),
             _ => None,
         };
     } else {
@@ -184,19 +178,16 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
         CallStatus::Resumed => {
             // 17819 13:43:39.897107 <... rt_sigprocmask resumed>NULL, 8) = 0 <0.000016>
             //                            ^^^^^^^^^^^^^^
-            syscall = tokens
-                .next()
-                .filter(|syscall_tok| {
-                    syscall_tok
-                        .chars()
-                        .next()
-                        .filter(|c| c.is_ascii_alphabetic())
-                        .is_some()
-                })
-                .and_then(|s| s.to_str().ok())?;
+            syscall = tokens.next().filter(|syscall_tok| {
+                syscall_tok
+                    .chars()
+                    .next()
+                    .filter(|c| c.is_ascii_alphabetic())
+                    .is_some()
+            })?;
 
             match syscall {
-                "clone" => {
+                b"clone" => {
                     // 17819 13:43:39.897681 <... clone resumed>, parent_tid=[17822], tls=0x7f1c6f753700, child_tidptr=0x7f1c6f7539d0) = 17822 <0.000041>
                     //                                  ^^^^^^^^^
                     if tokens
@@ -214,7 +205,7 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
                         }
                     }
                 }
-                "fork" | "vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
+                b"fork" | b"vfork" => other = Some(OtherFields::Clone(ProcType::Process)),
                 _ => {}
             }
         }
@@ -225,62 +216,46 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
 
             // 17819 13:43:39.892101 sigaltstack(NULL, {ss_sp=NULL, ss_flags=SS_DISABLE, ss_size=0}) = 0 <0.000012>
             //                       ^^^^^^^^^^^
-            syscall = syscall_split
-                .next()
-                .filter(|syscall_tok| {
-                    syscall_tok
-                        .chars()
-                        .next()
-                        .filter(|&c| c.is_ascii_alphabetic() || c == '_')
-                        .is_some()
-                })
-                .and_then(|s| s.to_str().ok())?;
+            syscall = syscall_split.next().filter(|syscall_tok| {
+                syscall_tok
+                    .chars()
+                    .next()
+                    .filter(|&c| c.is_ascii_alphabetic() || c == '_')
+                    .is_some()
+            })?;
 
             match syscall {
-                "open" => {
+                b"open" => {
                     // 17819 13:43:39.888967 open("/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache> <0.000014>
                     //                             ^^^^^^^^^^^^^^^^
-                    if let Some(f) = syscall_split
-                        .next()
-                        .and_then(|f| f.get(1..f.len() - 2))
-                        .and_then(|f| f.to_str().ok())
-                    {
+                    if let Some(f) = syscall_split.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
-                "openat" => {
+                b"openat" => {
                     // 17819 13:43:40.146677 openat(AT_FDCWD, "config.toml", O_RDONLY|O_CLOEXEC) = 3</var/opt/gitlab/gitaly/config.toml> <0.000026>
                     //                                         ^^^^^^^^^^^
-                    if let Some(f) = tokens
-                        .next()
-                        .and_then(|f| f.get(1..f.len() - 2))
-                        .and_then(|f| f.to_str().ok())
-                    {
+                    if let Some(f) = tokens.next().and_then(|f| f.get(1..f.len() - 2)) {
                         other = Some(OtherFields::File(f));
                     }
                 }
-                "execve" => {
+                b"execve" => {
                     // 17840 13:43:41.449433 execve("/bin/ps", ["ps", "-o", "rss=", "-p", "17838"], 0xc0001c2000 /* 22 vars */ <unfinished ...>
                     //                              ^^^^^^^^^^ ^^^^^^ ^^^^^ ^^^^^^^ ^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^ ^^ ^^ ^^^^
-                    if let Some(t) = syscall_split.next().and_then(|s| s.to_str().ok()) {
+                    if let Some(t) = syscall_split.next() {
                         let mut v = vec![t];
                         tokens
                             .by_ref()
                             .take_while(|&s| s != b"[/*" && s != b"/*")
-                            .filter_map(|s| s.to_str().ok())
                             .for_each(|arg| v.push(arg));
 
                         other = Some(OtherFields::Execve(v));
                     }
                 }
-                "futex" => {
+                b"futex" => {
                     // 17826 13:43:41.450300 futex(0xc00005ef48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
                     //                             ^^^^^^^^^^^^
-                    if let Some(addr) = syscall_split
-                        .next()
-                        .and_then(|a| a.get(..a.len() - 1))
-                        .and_then(|s| s.to_str().ok())
-                    {
+                    if let Some(addr) = syscall_split.next().and_then(|a| a.get(..a.len() - 1)) {
                         // 17826 13:43:41.450300 futex(0xc00005ef48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
                         //                                           ^^^^^^^^^^^^^^^^^^^
                         if tokens
@@ -292,27 +267,23 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
                         }
                     }
                 }
-                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto"
-                | "write" => {
+                b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg" | b"sendto"
+                | b"write" => {
                     // 17819 13:43:41.450318 read(22<pipe:[879334396]>,  <unfinished ...>
                     //                               ^^^^^^^^^^^^^^^^
-                    if let Some(f) = syscall_split
-                        .next()
-                        .and_then(|s| {
-                            s.splitn_str(2, "<")
-                                .nth(1)
-                                .and_then(|s| s.get(..s.len() - 2))
-                        })
-                        .and_then(|s| s.to_str().ok())
-                    {
+                    if let Some(f) = syscall_split.next().and_then(|s| {
+                        s.splitn_str(2, "<")
+                            .nth(1)
+                            .and_then(|s| s.get(..s.len() - 2))
+                    }) {
                         other = Some(OtherFields::File(f));
                     }
                 }
                 // Only set other when call is complete as new pid is not available on started
-                "fork" | "vfork" if matches!(call_status, CallStatus::Complete) => {
+                b"fork" | b"vfork" if matches!(call_status, CallStatus::Complete) => {
                     other = Some(OtherFields::Clone(ProcType::Process))
                 }
-                "clone" => {
+                b"clone" => {
                     // 17822 13:43:41.413034 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
                     //                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                     if let Some(flags) = tokens.next() {
@@ -351,16 +322,15 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
             // 17826 13:43:40.155194 <... epoll_ctl resumed>) = -1 EPERM (Operation not permitted) <0.000029>
             //                                                     ^^^^^
             if let Some(b'E') = token.get(0) {
-                let s = token.to_str().ok()?;
-                error = Some(s);
+                error = Some(token);
             }
 
             // 17819 13:43:40.149100 read(6</proc/sys/net/core/somaxconn>, "", 65531) = 0 <0.000013>
             //                                                                          ^
             if end_tokens.peek().is_none() {
                 match syscall {
-                    "clone" | "fork" | "vfork" | "read" | "recv" | "recvfrom" | "recvmsg"
-                    | "send" | "sendmsg" | "sendto" | "write" => {
+                    b"clone" | b"fork" | b"vfork" | b"read" | b"recv" | b"recvfrom"
+                    | b"recvmsg" | b"send" | b"sendmsg" | b"sendto" | b"write" => {
                         rtn_cd = token.to_str().ok().and_then(|s| s.parse::<i32>().ok())
                     }
                     _ => {}
@@ -404,13 +374,13 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16747,
-                time: "11:29:49.112721",
-                syscall: "open",
+                time: b"11:29:49.112721",
+                syscall: b"open",
                 duration: Some(0.000030),
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
-                other: Some(OtherFields::File("/dev/null")),
+                other: Some(OtherFields::File(b"/dev/null")),
             }))
         );
     }
@@ -428,8 +398,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 24009,
-                time: "09:07:12.773648",
-                syscall: "brk",
+                time: b"09:07:12.773648",
+                syscall: b"brk",
                 duration: Some(0.000011),
                 error: None,
                 rtn_cd: None,
@@ -452,13 +422,13 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16747,
-                time: "11:29:49.112721",
-                syscall: "open",
+                time: b"11:29:49.112721",
+                syscall: b"open",
                 duration: None,
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
-                other: Some(OtherFields::File("/dev/null")),
+                other: Some(OtherFields::File(b"/dev/null")),
             }))
         );
     }
@@ -470,13 +440,13 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16747,
-                time: "11:29:49.112721",
-                syscall: "open",
+                time: b"11:29:49.112721",
+                syscall: b"open",
                 duration: Some(0.000030),
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
-                other: Some(OtherFields::File("/dev/null")),
+                other: Some(OtherFields::File(b"/dev/null")),
             }))
         );
     }
@@ -488,8 +458,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16747,
-                time: "11:29:49.113885",
-                syscall: "clone",
+                time: b"11:29:49.113885",
+                syscall: b"clone",
                 duration: Some(0.000118),
                 error: None,
                 rtn_cd: None,
@@ -506,8 +476,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16747,
-                time: "11:29:49.113885",
-                syscall: "clone",
+                time: b"11:29:49.113885",
+                syscall: b"clone",
                 duration: Some(0.000118),
                 error: None,
                 rtn_cd: Some(23151),
@@ -524,16 +494,16 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 13656,
-                time: "10:53:02.442246",
-                syscall: "execve",
+                time: b"10:53:02.442246",
+                syscall: b"execve",
                 duration: Some(0.000229),
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
                 other: Some(OtherFields::Execve(vec![
-                    "\"/bin/sleep\",",
-                    "[\"sleep\",",
-                    "\"1\"],",
+                    b"\"/bin/sleep\",",
+                    b"[\"sleep\",",
+                    b"\"1\"],",
                 ])),
             }))
         );
@@ -546,16 +516,16 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 13656,
-                time: "10:53:02.442246",
-                syscall: "execve",
+                time: b"10:53:02.442246",
+                syscall: b"execve",
                 duration: None,
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Started,
                 other: Some(OtherFields::Execve(vec![
-                    "\"/bin/sleep\",",
-                    "[\"sleep\",",
-                    "\"1\"],",
+                    b"\"/bin/sleep\",",
+                    b"[\"sleep\",",
+                    b"\"1\"],",
                 ])),
             }))
         );
@@ -569,13 +539,13 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 27820,
-                time: "20:26:33.949452",
-                syscall: "futex",
+                time: b"20:26:33.949452",
+                syscall: b"futex",
                 duration: Some(0.000087),
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Complete,
-                other: Some(OtherFields::Futex("0x535c890")),
+                other: Some(OtherFields::Futex(b"0x535c890")),
             }))
         );
     }
@@ -587,13 +557,13 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 11638,
-                time: "11:34:25.556415",
-                syscall: "futex",
+                time: b"11:34:25.556415",
+                syscall: b"futex",
                 duration: None,
                 error: None,
                 rtn_cd: None,
                 call_status: CallStatus::Started,
-                other: Some(OtherFields::Futex("0x7ffa50080ff4"))
+                other: Some(OtherFields::Futex(b"0x7ffa50080ff4"))
             }))
         );
     }
@@ -605,8 +575,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 2965,
-                time: "11:34:25.561897",
-                syscall: "futex",
+                time: b"11:34:25.561897",
+                syscall: b"futex",
                 duration: Some(0.000025),
                 error: None,
                 rtn_cd: None,
@@ -624,8 +594,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 23740,
-                time: "11:34:25.556284",
-                syscall: "futex",
+                time: b"11:34:25.556284",
+                syscall: b"futex",
                 duration: None,
                 error: None,
                 rtn_cd: None,
@@ -642,8 +612,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 98252,
-                time: "03:48:28.335770",
-                syscall: "clone",
+                time: b"03:48:28.335770",
+                syscall: b"clone",
                 duration: Some(0.000038),
                 error: None,
                 rtn_cd: Some(98253),
@@ -660,8 +630,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 98245,
-                time: "03:48:28.282463",
-                syscall: "clone",
+                time: b"03:48:28.282463",
+                syscall: b"clone",
                 duration: Some(0.000068),
                 error: None,
                 rtn_cd: Some(98246),
@@ -678,8 +648,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 16093,
-                time: "04:37:37.662748",
-                syscall: "clone",
+                time: b"04:37:37.662748",
+                syscall: b"clone",
                 duration: None,
                 error: None,
                 rtn_cd: None,
@@ -696,8 +666,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 17826,
-                time: "13:43:48.972999",
-                syscall: "clone",
+                time: b"13:43:48.972999",
+                syscall: b"clone",
                 duration: Some(0.008941),
                 error: None,
                 rtn_cd: Some(17905),
@@ -714,8 +684,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 17821,
-                time: "13:43:39.901584",
-                syscall: "clone",
+                time: b"13:43:39.901584",
+                syscall: b"clone",
                 duration: Some(0.000064),
                 error: None,
                 rtn_cd: Some(17825),
@@ -732,8 +702,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 111462,
-                time: "08:55:58.704022",
-                syscall: "clone",
+                time: b"08:55:58.704022",
+                syscall: b"clone",
                 duration: Some(0.000060),
                 error: None,
                 rtn_cd: Some(103674),
@@ -750,8 +720,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 98781,
-                time: "10:30:46.143570",
-                syscall: "clone",
+                time: b"10:30:46.143570",
+                syscall: b"clone",
                 duration: Some(0.004605),
                 error: None,
                 rtn_cd: Some(56089),
@@ -768,8 +738,8 @@ mod tests {
             parse_line(input),
             Some(LineData::Syscall(RawData {
                 pid: 2974,
-                time: "11:34:28.581144",
-                syscall: "vfork",
+                time: b"11:34:28.581144",
+                syscall: b"vfork",
                 duration: Some(0.123110),
                 error: None,
                 rtn_cd: Some(27367),
@@ -810,7 +780,7 @@ mod tests {
             parse_line(input),
             Some(LineData::Exit(ExitData {
                 pid: 13350,
-                exit: ExitType::Signal("SIGTERM"),
+                exit: ExitType::Signal(b"SIGTERM"),
             }))
         );
     }

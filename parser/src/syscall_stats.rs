@@ -1,19 +1,21 @@
 use crate::syscall_data::PidData;
 use crate::HashMap;
 use crate::Pid;
+
+use bstr::ByteSlice;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct SyscallStats<'a> {
-    pub name: &'a str,
+    pub name: &'a [u8],
     pub count: i32,
     pub total: f32,
     max: f32,
     avg: f32,
     min: f32,
-    errors: HashMap<&'a str, i32>,
+    errors: HashMap<&'a [u8], i32>,
 }
 
 impl<'a> fmt::Display for SyscallStats<'a> {
@@ -22,20 +24,30 @@ impl<'a> fmt::Display for SyscallStats<'a> {
             write!(
                 f,
                 "{0: <17}    {1: >8}    {2: >10.3}    {3: >10.3}    {4: >10.3}    {5: >10.3}    ",
-                self.name, self.count, self.total, self.max, self.avg, self.min
+                self.name.to_str_lossy(),
+                self.count,
+                self.total,
+                self.max,
+                self.avg,
+                self.min
             )?;
         } else {
             write!(
                 f,
                 "{0: <17}    {1: >8}    {2: >10}    {3: >10}    {4: >10}    {5: >10}    ",
-                self.name, "1", "n/a", "n/a", "n/a", "n/a"
+                self.name.to_str_lossy(),
+                "1",
+                "n/a",
+                "n/a",
+                "n/a",
+                "n/a"
             )?;
         }
 
         let sorted_errs: BTreeMap<_, _> = self.errors.iter().collect();
 
         for (err, count) in sorted_errs.iter() {
-            write!(f, "{}: {}   ", err, count)?;
+            write!(f, "{}: {}   ", err.to_str_lossy(), count)?;
         }
 
         Ok(())
@@ -115,7 +127,7 @@ mod tests {
 477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
         let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
-        assert_eq!(pid_stats[&477][0].name, "fcntl");
+        assert_eq!(pid_stats[&477][0].name, b"fcntl");
     }
 
     #[test]
@@ -172,6 +184,6 @@ mod tests {
         let pid_data_map = build_syscall_data(input);
         let pid_stats = build_syscall_stats(&pid_data_map);
         let syscall_stats = &pid_stats[&477];
-        assert_eq!(syscall_stats[0].errors["ECHILD"], 1);
+        assert_eq!(syscall_stats[0].errors[b"ECHILD".as_ref()], 1);
     }
 }

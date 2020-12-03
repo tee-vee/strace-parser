@@ -1,4 +1,6 @@
 use crate::syscall_data::RawExec;
+
+use bstr::ByteSlice;
 use std::fmt;
 use std::iter::Zip;
 use std::slice::Iter;
@@ -20,38 +22,41 @@ impl Execs {
 
         raw_execs.sort_by(|x, y| x.time.cmp(y.time));
 
-        for raw_exec in raw_execs.iter() {
+        for raw_exec in raw_execs.into_iter() {
             let end_idx = raw_exec
                 .exec
                 .iter()
-                .position(|&a| a.ends_with("],"))
+                .position(|&a| a.ends_with_str("],"))
                 .map(|i| i + 1)
                 .unwrap_or(raw_exec.exec.len());
             let mut arg_iter = raw_exec.exec.iter().take(end_idx);
 
             let mut cmd = arg_iter
                 .next()
+                .map(|s| s.to_str_lossy().to_string())
                 .map(|c| Execs::trim_arg(c))
-                .unwrap_or_default()
-                .to_string();
+                .unwrap_or_default();
 
             cmd.push(' ');
 
             cmd.push_str(
                 arg_iter
                     .nth(1) // skip argv[0] as this is a repeat of cmd 99% of the time
+                    .map(|s| s.to_str_lossy().to_string())
                     .map(|a| Execs::trim_arg(a))
-                    .unwrap_or_default(),
+                    .unwrap_or_default()
+                    .as_str(),
             );
 
             cmd.push(' ');
 
             let full_cmd = arg_iter
+                .map(|s| s.to_str_lossy().to_string())
                 .map(|a| Execs::trim_arg(a))
-                .fold(cmd, |s, arg| s + arg + " ");
+                .fold(cmd, |s, arg| s + &arg + " ");
 
             cmds.push(full_cmd.trim().to_string());
-            times.push(raw_exec.time.to_string());
+            times.push(raw_exec.time.to_str_lossy().to_string());
         }
 
         Execs { cmds, times }
@@ -72,7 +77,7 @@ impl Execs {
         cmd.replace(r#"\n"#, &whitespace)
     }
 
-    fn trim_arg(arg: &str) -> &str {
+    fn trim_arg(arg: String) -> String {
         let initial_trim = arg
             .trim_start_matches(|c| c == '[')
             .trim_end_matches(|c| c == ',' || c == ']');
@@ -80,9 +85,12 @@ impl Execs {
         // Only trim quotes if arg is fully quoted and not a standalone quote
         // otherwise it's part of a quoted command, e.g. 'sh -c "ls -la"'
         if initial_trim.starts_with('"') && initial_trim.ends_with('"') && initial_trim != r#"""# {
-            initial_trim.trim_start_matches('"').trim_end_matches('"')
-        } else {
             initial_trim
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+                .to_string()
+        } else {
+            initial_trim.to_string()
         }
     }
 }

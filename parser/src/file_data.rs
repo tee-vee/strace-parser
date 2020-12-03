@@ -1,6 +1,8 @@
 use crate::parser::{CallStatus, RawData};
 use crate::syscall_data::PidData;
 use crate::{HashMap, Pid};
+
+use bstr::ByteSlice;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,18 +10,18 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileData<'a> {
     pub pid: Pid,
-    pub time: &'a str,
-    pub file: &'a str,
-    pub error: Option<&'a str>,
+    pub time: &'a [u8],
+    pub file: &'a [u8],
+    pub error: Option<&'a [u8]>,
     pub duration: f32,
 }
 
 impl<'a> FileData<'a> {
     fn new(
         pid: Pid,
-        time: &'a str,
-        file_opt: Option<&'a str>,
-        error: Option<&'a str>,
+        time: &'a [u8],
+        file_opt: Option<&'a [u8]>,
+        error: Option<&'a [u8]>,
         duration_opt: Option<f32>,
     ) -> FileData<'a> {
         FileData {
@@ -46,12 +48,15 @@ impl<'a, 'b> From<&'b RawData<'a>> for FileData<'a> {
 
 impl<'a> fmt::Display for FileData<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let error = self.error.unwrap_or("-");
+        let error = self.error.unwrap_or(b"-");
 
         write!(
             f,
             "{: >10.3}    {: ^15}    {: ^15}    {: <30}",
-            self.duration, self.time, error, self.file
+            self.duration,
+            self.time.to_str_lossy(),
+            error.to_str_lossy(),
+            self.file.to_str_lossy()
         )
     }
 }
