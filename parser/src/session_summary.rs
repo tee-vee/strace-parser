@@ -2,9 +2,10 @@ use crate::exec::Execs;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{directories, directories::SortDirectoriesBy};
+use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
+
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -245,7 +246,7 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        let mut addr_graph: UnGraphMap<&str, i8> = UnGraphMap::new();
+        let mut addr_graph: UnGraphMap<&[u8], i8> = UnGraphMap::new();
         for (&&addr, pids) in &addr_map {
             for (inner_addr, inner_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
                 if !pids.is_disjoint(inner_pids) {
@@ -604,7 +605,8 @@ impl<'a> SessionSummary<'a> {
         raw_data: &HashMap<Pid, PidData<'a>>,
         sort_by: SortEventsBy,
     ) -> Result<(), Error> {
-        let open_calls = directories::directories_opened(&pids_to_print, raw_data, SortDirectoriesBy::Time);
+        let open_calls =
+            directories::directories_opened(&pids_to_print, raw_data, SortDirectoriesBy::Time);
 
         writeln!(stdout(), "\nDirectories accessed for files")?;
         writeln!(
@@ -643,7 +645,13 @@ impl<'a> SessionSummary<'a> {
         }
 
         for (fullpath, dir) in open_events {
-            writeln!(stdout(), "  {: >7}    {}    {: <30}", dir.pid, dir, fullpath)?;
+            writeln!(
+                stdout(),
+                "  {: >7}    {}    {: <30}",
+                dir.pid,
+                dir,
+                fullpath,
+            )?;
         }
 
         writeln!(stdout())?;
@@ -760,12 +768,12 @@ mod tests {
 
     #[test]
     fn pid_summary_count_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+        let input = br##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].syscall_count, 5);
@@ -773,12 +781,12 @@ mod tests {
 
     #[test]
     fn pid_summary_active_time_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+        let input = br##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].system_active_time, 3000.0);
@@ -786,12 +794,12 @@ mod tests {
 
     #[test]
     fn pid_summary_wait_time_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+        let input = br##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].system_wait_time, 2000.0);
@@ -799,11 +807,11 @@ mod tests {
 
     #[test]
     fn pid_summary_total_time_correct() {
-        let input = r##"566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
+        let input = br##"566   00:09:49.000000 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:50.000000 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:51.000000 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 4000.0);
@@ -811,9 +819,9 @@ mod tests {
 
     #[test]
     fn pid_summary_total_time_syscall_starts_pre_strace_correct() {
-        let input = r##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <100.000000>
+        let input = br##"566   00:09:48.000000 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <100.000000>
 566   00:09:52.000000 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert_eq!(summary.pid_summaries[&566].total_time, 101_000.0);
@@ -821,13 +829,13 @@ mod tests {
 
     #[test]
     fn pid_summary_child_pids_correct() {
-        let input = r##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
+        let input = br##"566   00:09:48.145068 <... restart_syscall resumed> ) = -1 ETIMEDOUT (Connection timed out) <1.000000>
 566   00:09:48.145114 futex(0x7f5efea4bd28, FUTEX_WAKE_PRIVATE, 1) = 0 <1.000000>
 566   00:09:48.145182 socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG) = 221<NETLINK:[3604353]> <1.000000>
 566   00:09:48.145264 fstat(221<NETLINK:[3604353]>, {st_mode=S_IFSOCK|0777, st_size=0, ...}) = 0 <1.000000>
 566   00:09:48.145929 open("/proc/net/unix", O_RDONLY|O_CLOEXEC) = 222</proc/495/net/unix> <1.000000>
 566   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000000>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         assert!(summary.pid_summaries[&566].child_pids.contains(&7390));
@@ -835,11 +843,11 @@ mod tests {
 
     #[test]
     fn pid_summary_threads_symetrical() {
-        let input = r##"1875  1546841132.010874 clone(child_stack=0x7f3f8dffef70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8dfff9d0, tls=0x7f3f8dfff700, child_tidptr=0x7f3f8dfff9d0) = 20222 <0.000037>
+        let input = br##"1875  1546841132.010874 clone(child_stack=0x7f3f8dffef70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8dfff9d0, tls=0x7f3f8dfff700, child_tidptr=0x7f3f8dfff9d0) = 20222 <0.000037>
 1875  1546841132.011524 clone(child_stack=0x7f3f8d5fdf70, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f3f8d5fe9d0, tls=0x7f3f8d5fe700, child_tidptr=0x7f3f8d5fe9d0) = 20223 <0.000031>
 20222 1546841132.017849 set_robust_list(0x7f3f8dfff9e0, 24) = 0 <0.000009>
 20223 1546841132.016568 set_robust_list(0x7f3f8d5fe9e0, 24) = 0 <0.000010>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
@@ -868,14 +876,14 @@ mod tests {
 
     #[test]
     fn pid_summary_futex_threads_traced() {
-        let input = r##"17038 11:36:25.284840 futex(0x7ff622820044, FUTEX_WAIT_PRIVATE, 30825, NULL <unfinished ...>
+        let input = br##"17038 11:36:25.284840 futex(0x7ff622820044, FUTEX_WAIT_PRIVATE, 30825, NULL <unfinished ...>
 24685 11:36:25.736368 futex(0x7ff622820044, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820040, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1} <unfinished ...>
 17041 11:36:27.818916 futex(0x7ff62282007c, FUTEX_WAIT_PRIVATE, 9057, NULL <unfinished ...>
 17041 11:36:27.821480 futex(0x7ff622820010, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
 17043 11:36:31.261304 futex(0x7ff62282007c, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820078, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1}) = 1 <0.000012>
 24518 11:36:31.463766 futex(0x7ff622820044, FUTEX_WAKE_OP_PRIVATE, 1, 1, 0x7ff622820040, {FUTEX_OP_SET, 0, FUTEX_OP_CMP_GT, 1}) = 1 <0.000146>
 24518 11:36:31.462456 futex(0x7ff622820010, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
@@ -918,7 +926,7 @@ mod tests {
 
     #[test]
     fn pid_summary_execve_convert_thread_to_child() {
-        let input = r##"8442  02:21:10.759733 futex(0xcccee86f48, FUTEX_WAIT_PRIVATE, 3, NULL <unfinished ...>
+        let input = br##"8442  02:21:10.759733 futex(0xcccee86f48, FUTEX_WAIT_PRIVATE, 3, NULL <unfinished ...>
 8357  02:21:10.760083 futex(0xc000084848, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
 8355  02:21:10.760103 futex(0x7f79a8c0d22c, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
 8346  02:21:10.760204 futex(0xc000084848, FUTEX_WAIT_PRIVATE, 0, NULL <unfinished ...>
@@ -932,7 +940,7 @@ mod tests {
 9157  02:21:15.003498 <... clone resumed>, parent_tid=[9159], tls=0x7ff9b31d6700, child_tidptr=0x7ff9b31d69d0) = 9159 <0.000082>
 9154  02:21:15.013127 futex(0xcccee86f48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>
 9159  02:21:15.026908 futex(0xcccee86f48, FUTEX_WAKE_PRIVATE, 1 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
@@ -1008,11 +1016,11 @@ mod tests {
 
     #[test]
     fn pid_summary_futex_thread_check_excludes_children() {
-        let input = r##"2979 11:34:25.556415 futex(0x7ffa5fbf9f24, FUTEX_WAIT_PRIVATE, 27, NULL <unfinished ...>
+        let input = br##"2979 11:34:25.556415 futex(0x7ffa5fbf9f24, FUTEX_WAIT_PRIVATE, 27, NULL <unfinished ...>
 2989  11:34:25.557272 futex(0x7ffa5fbf9f24, FUTEX_WAIT_PRIVATE, 861, NULL <unfinished ...>
 2979  11:34:27.679833 <... vfork resumed> ) = 11608 <0.141899>
 11608 11:34:27.539786 futex(0x7ffa5fbf9f24, FUTEX_WAIT_BITSET_PRIVATE, 1, {2975525, 987165583}, ffffffff <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
 
@@ -1043,11 +1051,11 @@ mod tests {
 
     #[test]
     fn pid_summary_pid_start_time_sort() {
-        let input = r##"32766  07:55:04.273462 <... clone resumed> child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 26124 <0.002655>
+        let input = br##"32766  07:55:04.273462 <... clone resumed> child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 26124 <0.002655>
 26124 07:55:04.270880 rt_sigaction(SIGHUP, {sa_handler=SIG_DFL, sa_mask=~[], sa_flags=SA_RESTORER|SA_ONSTACK|SA_RESTART|SA_SIGINFO, sa_restorer=0x462ca0}, NULL, 8) = 0 <0.000016>
 9746  07:55:15.336457 <... clone resumed> child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 412 <0.002946>
 412 07:55:15.336879 close(3</etc/ld.so.cache> <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         let syscall_stats = build_syscall_stats(&pid_data_map);
         let summary = SessionSummary::from_syscall_stats(&syscall_stats, &pid_data_map);
         let sorted: Vec<_> = summary

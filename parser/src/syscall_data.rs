@@ -1,5 +1,5 @@
 use crate::parser;
-use crate::parser::{OtherFields, ExitType, LineData, ProcType, RawData};
+use crate::parser::{ExitType, LineData, OtherFields, ProcType, RawData};
 use crate::Pid;
 use crate::{HashMap, HashSet};
 
@@ -9,7 +9,7 @@ use std::convert::TryFrom;
 #[derive(Clone, Default, Debug)]
 pub struct SyscallData<'a> {
     pub lengths: Vec<f32>,
-    pub errors: HashMap<&'a str, Pid>,
+    pub errors: HashMap<&'a [u8], Pid>,
 }
 
 impl<'a> SyscallData<'a> {
@@ -23,10 +23,10 @@ impl<'a> SyscallData<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub struct PidData<'a> {
-    pub syscall_data: HashMap<&'a str, SyscallData<'a>>,
-    pub start_time: &'a str,
-    pub end_time: &'a str,
-    pub pvt_futex: HashSet<&'a str>,
+    pub syscall_data: HashMap<&'a [u8], SyscallData<'a>>,
+    pub start_time: &'a [u8],
+    pub end_time: &'a [u8],
+    pub pvt_futex: HashSet<&'a [u8]>,
     pub split_clones: Vec<RawData<'a>>,
     pub threads: Vec<Pid>,
     pub child_pids: Vec<Pid>,
@@ -40,8 +40,8 @@ impl<'a> PidData<'a> {
     pub fn new() -> PidData<'a> {
         PidData {
             syscall_data: HashMap::default(),
-            start_time: "zzzzz", // greater than any valid time str
-            end_time: "00000",   // less than any valid time str
+            start_time: b"zzzzz", // greater than any valid time str
+            end_time: b"00000",   // less than any valid time str
             pvt_futex: HashSet::new(),
             split_clones: Vec::new(),
             threads: Vec::new(),
@@ -74,12 +74,12 @@ impl<'a> PidData<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub struct RawExec<'a> {
-    pub exec: Vec<&'a str>,
-    pub time: &'a str,
+    pub exec: Vec<&'a [u8]>,
+    pub time: &'a [u8],
 }
 
 impl<'a> RawExec<'a> {
-    pub fn new(exec: Vec<&'a str>, time: &'a str) -> RawExec<'a> {
+    pub fn new(exec: Vec<&'a [u8]>, time: &'a [u8]) -> RawExec<'a> {
         RawExec { exec, time }
     }
 }
@@ -97,9 +97,9 @@ impl<'a> TryFrom<RawData<'a>> for RawExec<'a> {
     }
 }
 
-pub fn build_syscall_data<'a>(buffer: &'a str) -> HashMap<Pid, PidData<'a>> {
+pub fn build_syscall_data<'a>(buffer: &'a [u8]) -> HashMap<Pid, PidData<'a>> {
     let mut data_map = buffer
-        .par_lines()
+        .par_split(|c| *c == b'\n')
         .fold(HashMap::default, |mut pid_data_map, line| {
             if let Some(raw_data) = parser::parse_line(line) {
                 add_syscall_data(&mut pid_data_map, raw_data);
@@ -148,7 +148,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
             }
 
             match raw_data.syscall {
-                "clone" | "fork" | "vfork" => match (raw_data.rtn_cd, &raw_data.other) {
+                b"clone" | b"fork" | b"vfork" => match (raw_data.rtn_cd, &raw_data.other) {
                     (Some(child_pid), Some(OtherFields::Clone(ProcType::Process))) => {
                         pid_entry.child_pids.push(child_pid as Pid)
                     }
@@ -161,7 +161,7 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
                     }
                     _ => {}
                 },
-                "execve" => {
+                b"execve" => {
                     if let Ok(e) = RawExec::try_from(raw_data) {
                         if let Some(execs) = &mut pid_entry.execve {
                             execs.push(e);
@@ -170,15 +170,16 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
                         }
                     }
                 }
-                "futex" => {
+                b"futex" => {
                     if let Some(OtherFields::Futex(addr)) = raw_data.other {
                         pid_entry.pvt_futex.insert(addr);
                     }
                 }
-                "open" | "openat" => {
+                b"open" | b"openat" => {
                     pid_entry.open_events.push(raw_data);
                 }
-                "read" | "recv" | "recvfrom" | "recvmsg" | "send" | "sendmsg" | "sendto" | "write" => {
+                b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg" | b"sendto"
+                | b"write" => {
                     pid_entry.io_events.push(raw_data);
                 }
                 _ => {}
@@ -188,7 +189,6 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
             pid_entry.exit = Some(exit_data.exit);
         }
     }
-
 }
 
 fn coalesce_pid_data<'a>(
@@ -256,124 +256,132 @@ mod tests {
 
     #[test]
     fn syscall_data_captures_lengths() {
-        let input = r##"567   00:09:47.836504 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 221</proc/495/fd> <0.000027>
+        let input = br##"567   00:09:47.836504 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 221</proc/495/fd> <0.000027>
 567   00:10:56.303348 open("/proc/self/status", O_RDONLY|O_CLOEXEC) = 228</proc/495/status> <0.000028>
-567   00:10:56.360699 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 228</proc/495/fd> <0.000484>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+567   00:10:56.360699 open("/proc/self/fd", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 228</proc/495/fd> <0.000484>"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(
-            pid_data_map[&567].syscall_data["open"].lengths,
+            pid_data_map[&567].syscall_data[b"open".as_ref()].lengths,
             vec![0.000027, 0.000028, 0.000484]
         );
     }
 
     #[test]
     fn syscall_data_captures_errors() {
-        let input = r##"823   00:09:51.247794 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000010>
-823   00:09:58.635714 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000013>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"823   00:09:51.247794 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000010>
+823   00:09:58.635714 ioctl(44</proc/823/status>, TCGETS, 0x7ffc6d3d2d10) = -1 ENOTTY (Inappropriate ioctl for device) <0.000013>"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(
-            pid_data_map[&823].syscall_data["ioctl"]
+            pid_data_map[&823].syscall_data[b"ioctl".as_ref()]
                 .errors
                 .clone()
                 .into_iter()
-                .collect::<Vec<(&str, i32)>>(),
-            vec![("ENOTTY", 2)]
+                .collect::<Vec<(&[u8], i32)>>(),
+            vec![(b"ENOTTY".as_ref(), 2)]
         );
     }
 
     #[test]
     fn syscall_data_captures_thread() {
-        let input = r##"28898 21:16:52.387464 clone(child_stack=0x7f03e0beeff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f03e0bef9d0, tls=0x7f03e0bef700, child_tidptr=0x7f03e0bef9d0) = 28899 <0.000081>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"28898 21:16:52.387464 clone(child_stack=0x7f03e0beeff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, parent_tidptr=0x7f03e0bef9d0, tls=0x7f03e0bef700, child_tidptr=0x7f03e0bef9d0) = 28899 <0.000081>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map[&28898].threads.contains(&28899));
     }
 
     #[test]
     fn syscall_data_captures_child_pid() {
-        let input = r##"477   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000134>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"477   00:09:47.914797 clone(child_stack=0, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fe5648a69d0) = 7390 <0.000134>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map[&477].child_pids.contains(&7390));
     }
 
     #[test]
     fn syscall_data_captures_split_clone_proc() {
-        let input = r##"17826 13:43:48.980451 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
-17826 13:43:48.993404 <... clone resumed>) = 17906 <0.012945>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"17826 13:43:48.980451 clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+17826 13:43:48.993404 <... clone resumed>) = 17906 <0.012945>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map[&17826].child_pids.contains(&17906));
     }
 
     #[test]
     fn syscall_data_captures_split_clone_thread() {
-        let input = r##"17839 13:43:43.960050 clone(child_stack=0x7f1afced1ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
-17839 13:43:43.960137 <... clone resumed>, parent_tid=[17857], tls=0x7f1afced2700, child_tidptr=0x7f1afced29d0) = 17857 <0.000076>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"17839 13:43:43.960050 clone(child_stack=0x7f1afced1ff0, flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID <unfinished ...>
+17839 13:43:43.960137 <... clone resumed>, parent_tid=[17857], tls=0x7f1afced2700, child_tidptr=0x7f1afced29d0) = 17857 <0.000076>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map[&17839].threads.contains(&17857));
     }
 
     #[test]
     fn syscall_data_unfinished_events_captured() {
-        let input = r##"826   00:09:47.789757 restart_syscall(<... resuming interrupted poll ...> <unfinished ...>
-2690  00:09:47.790444 <... futex resumed> ) = -1 EAGAIN (Resource temporarily unavailable) <0.000025>"##.to_string();
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"826   00:09:47.789757 restart_syscall(<... resuming interrupted poll ...> <unfinished ...>
+2690  00:09:47.790444 <... futex resumed> ) = -1 EAGAIN (Resource temporarily unavailable) <0.000025>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map.contains_key(&826))
     }
 
     #[test]
     fn syscall_data_captures_execve() {
-        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(input);
         assert!(pid_data_map[&13656].execve.is_some());
     }
 
     #[test]
     fn syscall_data_captures_multiple_execve() {
-        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
 13656 10:54:02.442246 execve("/bin/ls", ["ls", "/usr"], [/* 12 vars */]) = 0 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(2, pid_data_map[&13656].execve.as_ref().unwrap().len());
     }
 
     #[test]
     fn pid_data_captures_start_time() {
-        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
-        assert_eq!("10:53:02.442246", pid_data_map[&13656].start_time,);
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(input);
+        assert_eq!(b"10:53:02.442246", pid_data_map[&13656].start_time,);
     }
 
     #[test]
     fn pid_data_captures_end_time() {
-        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
-        assert_eq!("10:53:02.442246", pid_data_map[&13656].end_time,);
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(input);
+        assert_eq!(b"10:53:02.442246", pid_data_map[&13656].end_time,);
     }
 
     #[test]
     fn pid_data_updates_end_time() {
-        let input = r##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>
 13656 12:00:00.000000 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...> "##;
-        let pid_data_map = build_syscall_data(&input);
-        assert_eq!("12:00:00.000000", pid_data_map[&13656].end_time,);
+        let pid_data_map = build_syscall_data(input);
+        assert_eq!(b"12:00:00.000000", pid_data_map[&13656].end_time,);
     }
 
     #[test]
     fn pid_data_captures_exit_code() {
-        let input = r##"203 01:58:06.988634 +++ exited with 1 +++"##;
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"203 01:58:06.988634 +++ exited with 1 +++"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(Some(ExitType::Exit(1)), pid_data_map[&203].exit);
     }
 
     #[test]
     fn pid_data_captures_futex_addrs() {
-        let input = r##"11616 11:34:25.556786 futex(0x7ffa5001fa54, FUTEX_WAIT_PRIVATE, 29, NULL <unfinished ...>"##;
-        let pid_data_map = build_syscall_data(&input);
+        let input = br##"11616 11:34:25.556786 futex(0x7ffa5001fa54, FUTEX_WAIT_PRIVATE, 29, NULL <unfinished ...>"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(
-            &["0x7ffa5001fa54"],
+            &[b"0x7ffa5001fa54"],
             &pid_data_map[&11616]
                 .pvt_futex
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>()[..1]
         );
+    }
+
+    #[test]
+    fn pid_data_handles_windows_newlines() {
+        let input = br##"13656 10:53:02.442246 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...>\r
+13656 12:00:00.000000 execve("/bin/sleep", ["sleep", "1"], [/* 12 vars */]) = 0 <unfinished ...> "##;
+        let pid_data_map = build_syscall_data(input);
+        assert_eq!(b"12:00:00.000000", pid_data_map[&13656].end_time,);
     }
 }

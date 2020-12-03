@@ -1,6 +1,8 @@
 use crate::parser::{CallStatus, RawData};
 use crate::syscall_data::PidData;
 use crate::{HashMap, Pid};
+
+use bstr::ByteSlice;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,24 +10,30 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq)]
 pub struct IoCall<'a> {
     pub pid: Pid,
-    pub time: &'a str,
-    pub syscall: &'a str,
-    pub fd: &'a str,
+    pub time: &'a [u8],
+    pub syscall: &'a [u8],
+    pub fd: &'a [u8],
     pub bytes: i32,
     pub duration: f32,
-    pub error: Option<&'a str>,
+    pub error: Option<&'a [u8]>,
 }
 
 impl<'a> fmt::Display for IoCall<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let error = self.error.unwrap_or("-");
+        let error = self.error.unwrap_or(b"-");
         let bytes = if self.bytes < 0 { 0 } else { self.bytes };
         let duration = self.duration * 1000.0;
 
         write!(
             f,
             "  {: >7}    {: >10.3}    {: ^15}    {: <8}    {: >8}     {: ^15}    {: <30}",
-            self.pid, duration, self.time, self.syscall, bytes, error, self.fd
+            self.pid,
+            duration,
+            self.time.to_str_lossy(),
+            self.syscall.to_str_lossy(),
+            bytes,
+            error.to_str_lossy(),
+            self.fd.to_str_lossy()
         )
     }
 }
@@ -59,7 +67,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                 syscall: event.syscall,
                 fd: event
                     .file()
-                    .unwrap_or("Unavailable: '-y' flag was not passed to strace"),
+                    .unwrap_or(b"Unavailable: '-y' flag was not passed to strace"),
                 bytes: event.rtn_cd.unwrap_or_default(),
                 duration: event.duration.unwrap_or_default(),
                 error: event.error,
@@ -72,7 +80,7 @@ fn coalesce_io_events<'a>(events: &[RawData<'a>]) -> Vec<IoCall<'a>> {
                         syscall: event.syscall,
                         fd: event
                             .file()
-                            .unwrap_or("Unavailable: '-y' flag was not passed to strace"),
+                            .unwrap_or(b"Unavailable: '-y' flag was not passed to strace"),
                         bytes: next_event.rtn_cd.unwrap_or_default(),
                         duration: next_event.duration.unwrap_or_default(),
                         error: next_event.error,

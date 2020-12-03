@@ -1,11 +1,13 @@
 use crate::syscall_data::PidData;
 use crate::HashMap;
 use crate::Pid;
+
+use bstr::ByteSlice;
 use std::collections::BTreeMap;
 use std::io::{prelude::*, stdout, Error};
 
 pub fn print_histogram(
-    syscall: &str,
+    syscall: &[u8],
     pids: &[Pid],
     syscall_data: &HashMap<Pid, PidData>,
 ) -> Result<(), Error> {
@@ -16,12 +18,17 @@ pub fn print_histogram(
     let max = match distribution.values().max() {
         Some(m) => *m,
         None => {
-            writeln!(stdout(), "No data found for {}", syscall)?;
+            writeln!(stdout(), "No data found for {}", syscall.to_str_lossy())?;
             return Ok(());
         }
     };
 
-    writeln!(stdout(), "\n  syscall: {}\n  pids: {}\n", syscall, pid_list)?;
+    writeln!(
+        stdout(),
+        "\n  syscall: {}\n  pids: {}\n",
+        syscall.to_str_lossy(),
+        pid_list
+    )?;
     writeln!(
         stdout(),
         "       {: ^5}        {: >8}     {: <12}",
@@ -64,7 +71,7 @@ pub fn print_histogram(
 }
 
 fn build_distribution(
-    syscall: &str,
+    syscall: &[u8],
     pids: &[Pid],
     syscall_data: &HashMap<Pid, PidData>,
 ) -> BTreeMap<u32, i32> {
@@ -153,39 +160,36 @@ mod tests {
 
     #[test]
     fn histogram_handles_empty_pids() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.500000>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <1.000000>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <1.000000>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <1.500000>"##;
+        let pid_data_map = build_syscall_data(input);
         assert_eq!(
-            build_distribution("open", &Vec::new(), &pid_data_map),
+            build_distribution(b"open", &Vec::new(), &pid_data_map),
             BTreeMap::new()
         );
     }
 
     #[test]
     fn histogram_finds_max_pow_2() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <0.000100>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
-        let dist = build_distribution("fcntl", &vec![477], &pid_data_map);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##;
+        let pid_data_map = build_syscall_data(input);
+        let dist = build_distribution(b"fcntl", &vec![477], &pid_data_map);
         assert_eq!(dist.keys().last(), Some(&10));
     }
 
     #[test]
     fn histogram_fills_empty_pows() {
-        let input = r##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
+        let input = br##"477   00:09:56.954410 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
 477   00:09:56.954448 fcntl(1<pipe:[3578440]>, F_DUPFD, 10) = 10<pipe:[3578440]> <0.000100>
 477   00:09:56.954488 fcntl(1<pipe:[3578440]>, F_GETFD) = 0 <0.000100>
-477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##
-            .to_string();
-        let pid_data_map = build_syscall_data(&input);
-        let dist = build_distribution("fcntl", &vec![477], &pid_data_map);
+477   00:09:56.954525 fcntl(10<pipe:[3578440]>, F_SETFD, FD_CLOEXEC) = 0 <0.001500>"##;
+        let pid_data_map = build_syscall_data(input);
+        let dist = build_distribution(b"fcntl", &vec![477], &pid_data_map);
         assert_eq!(dist.get(&9), Some(&0));
     }
 }

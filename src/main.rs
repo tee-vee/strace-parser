@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use clap::ArgMatches;
 use memmap::MmapOptions;
 use parser::histogram;
@@ -10,7 +11,6 @@ use parser::HashSet;
 use parser::Pid;
 use std::error::Error;
 use std::fs::File;
-use std::str;
 
 mod check_flags;
 mod cli;
@@ -44,22 +44,24 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
     let file_name = app_matches.value_of("INPUT").ok_or("Missing filename")?;
     let file = File::open(file_name)?;
     let mmap = unsafe { MmapOptions::new().map(&file) }?;
-    let buffer = str::from_utf8(&mmap)?;
+    let bytes = mmap.as_ref();
 
-    if buffer.is_empty() {
+    if bytes.is_empty() {
         eprintln!("Error: {} is empty", file_name);
         std::process::exit(1);
     }
 
-    match check_flags::correct_strace_flags(&buffer.lines().nth(0).unwrap_or_default()) {
+    match check_flags::correct_strace_flags(
+        bytes.lines().next().unwrap_or_default().to_str().unwrap(),
+    ) {
         Ok(true) => {}
         _ => std::process::exit(0),
     }
 
-    let syscall_data = syscall_data::build_syscall_data(&buffer);
+    let syscall_data = syscall_data::build_syscall_data(bytes);
     let syscall_stats = syscall_stats::build_syscall_stats(&syscall_data);
     let session_summary = SessionSummary::from_syscall_stats(&syscall_stats, &syscall_data);
-    let elapsed_time = time::parse_elapsed_real_time(&buffer);
+    let elapsed_time = time::parse_elapsed_real_time(bytes);
 
     let (subcmd, args) = parse_subcmd(&app_matches);
 
@@ -104,7 +106,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
         SubCmd::Quantize => {
             let pids_to_print = select_pids(&args, &session_summary)?;
             let syscall = args.value_of("syscall").unwrap_or_default();
-            histogram::print_histogram(&syscall, &pids_to_print, &syscall_data)
+            histogram::print_histogram(syscall.as_bytes(), &pids_to_print, &syscall_data)
         }
         SubCmd::List => {
             let count_to_print = if let Some(count) = args.value_of("count") {
