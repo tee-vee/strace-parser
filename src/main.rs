@@ -95,7 +95,7 @@ fn execute(app_matches: ArgMatches) -> Result<(), Box<dyn Error>> {
                 .value_of("sort_by")
                 .unwrap_or_default()
                 .parse::<SortEventsBy>()
-                .unwrap_or(SortEventsBy::Time);
+                .unwrap_or(SortEventsBy::Count);
             session_summary.print_opened_directories(&pids_to_print, &syscall_data, sort_by)
         }
         SubCmd::Exec => {

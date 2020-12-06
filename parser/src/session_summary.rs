@@ -2,8 +2,7 @@ use crate::exec::Execs;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{directories, directories::SortDirectoriesBy};
-use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
+use crate::{directories, file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
 
 use chrono::Duration;
@@ -605,8 +604,7 @@ impl<'a> SessionSummary<'a> {
         raw_data: &HashMap<Pid, PidData<'a>>,
         sort_by: SortEventsBy,
     ) -> Result<(), Error> {
-        let open_calls =
-            directories::directories_opened(&pids_to_print, raw_data, SortDirectoriesBy::Time);
+        let open_calls = directories::directories_opened(&pids_to_print, raw_data);
 
         writeln!(stdout(), "\nDirectories accessed for files")?;
         writeln!(
@@ -638,12 +636,10 @@ impl<'a> SessionSummary<'a> {
                 open_events.par_sort_by(|(_, x), (_, y)| {
                     (y.duration)
                         .partial_cmp(&x.duration)
-                        .expect("Invalid comparison on io durations")
+                        .expect("Invalid comparison on directory durations")
                 });
             }
-            SortEventsBy::Pid => {
-                open_events.par_sort_by(|(_, x), (_, y)| (x.pid).cmp(&y.pid));
-            }
+            SortEventsBy::Pid => {} // Events are already sorted by pid, no action needed
             SortEventsBy::Time => {
                 open_events.par_sort_by(|(_, x), (_, y)| (x.start_time).cmp(y.start_time));
             }
