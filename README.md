@@ -187,15 +187,19 @@ PID 28912
 
 ---
 
-#### directory
+#### directories
 
 List sums of durations of `open` and `openat` calls in directories and their child directories.
 
-`strace-parser <INPUT> io [FLAGS] [OPTIONS]`
+For example, the row for `/` will sum all calls made in `/var` and `/opt`, as well as all calls
+performed in `/` itself.
+
+`strace-parser <INPUT> directories [FLAGS] [OPTIONS]`
 
 **Options**:
    * `-p, --pid <PIDS>...` - Limit results to one or more PIDs
    * `-s, --sort <SORT_BY>` - Field to sort results by, defaults to timestamp. Options:
+      * `count`
       * `duration`
       * `pid`
       * `time`
@@ -207,13 +211,13 @@ List sums of durations of `open` and `openat` calls in directories and their chi
 ```
 Directories accessed for files
 
-      pid      dur (ms)       timestamp       directory name
-  -------    ----------    ---------------    ---------------
-    12392         0.015    01:57:37.917644    /opt/gitlab/embedded/lib/tls
-    12392         0.041    01:57:37.917806    /opt/gitlab/embedded/lib
-    12392         0.047    01:57:37.920448    /lib
-    12392         0.162    01:57:37.924743    /opt
-    12392         0.162    01:57:37.924743    /opt/gitlab
+      pid      dur (ms)      first time          last time          open ct    directory name
+  -------    ----------    ---------------    ---------------    ----------    --------------
+  1071655     72399.930    02:43:35.288223    02:47:18.785449       1682782    /
+  1071655         0.075    02:43:35.288223    02:43:35.355015             3    /proc
+  1071655         0.052    02:43:35.288223    02:43:35.355015             2    /proc/self
+  1071655         0.149    02:43:35.302629    02:46:54.763037             9    /etc
+  1071655         0.255    02:43:35.302831    02:46:54.763379            15    /lib64
 ```
 
 ---

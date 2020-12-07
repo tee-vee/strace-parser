@@ -2,10 +2,10 @@ use crate::exec::Execs;
 use crate::pid_summary::PrintAmt;
 use crate::syscall_data::PidData;
 use crate::syscall_stats::SyscallStats;
-use crate::{directories, directories::SortDirectoriesBy};
-use crate::{file_data, file_data::SortFilesBy, io_data, pid_tree};
+use crate::{directories, file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
 
+use bstr::ByteSlice;
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -585,7 +585,7 @@ impl<'a> SessionSummary<'a> {
             SortEventsBy::Pid => {
                 open_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
             }
-            SortEventsBy::Time => {
+            SortEventsBy::Time | SortEventsBy::Count => {
                 open_events.par_sort_by(|x, y| (x.time).cmp(y.time));
             }
         }
@@ -605,21 +605,22 @@ impl<'a> SessionSummary<'a> {
         raw_data: &HashMap<Pid, PidData<'a>>,
         sort_by: SortEventsBy,
     ) -> Result<(), Error> {
-        let open_calls =
-            directories::directories_opened(&pids_to_print, raw_data, SortDirectoriesBy::Time);
+        let open_calls = directories::directories_opened(&pids_to_print, raw_data);
 
         writeln!(stdout(), "\nDirectories accessed for files")?;
         writeln!(
             stdout(),
-            "\n  {: >7}    {: >10}    {: ^15}    {: <30}",
+            "\n  {: >7}    {: >10}    {: ^15}    {: ^15}    {: >10}    {: <30}",
             "pid",
             "dur (ms)",
-            "timestamp",
+            "first time",
+            "last time",
+            "open ct",
             "directory name"
         )?;
         writeln!(
             stdout(),
-            "  -------    ----------    ---------------    ---------------"
+            "  -------    ----------    ---------------    ---------------    ----------    --------------"
         )?;
 
         let mut open_events: Vec<_> = pids_to_print
@@ -629,18 +630,19 @@ impl<'a> SessionSummary<'a> {
             .collect();
 
         match sort_by {
+            SortEventsBy::Count => {
+                open_events.par_sort_by(|(_, x), (_, y)| (y.ct).cmp(&x.ct));
+            }
             SortEventsBy::Duration => {
                 open_events.par_sort_by(|(_, x), (_, y)| {
                     (y.duration)
                         .partial_cmp(&x.duration)
-                        .expect("Invalid comparison on io durations")
+                        .expect("Invalid comparison on directory durations")
                 });
             }
-            SortEventsBy::Pid => {
-                open_events.par_sort_by(|(_, x), (_, y)| (x.pid).cmp(&y.pid));
-            }
+            SortEventsBy::Pid => {} // Events are already sorted by pid, no action needed
             SortEventsBy::Time => {
-                open_events.par_sort_by(|(_, x), (_, y)| (x.time).cmp(y.time));
+                open_events.par_sort_by(|(_, x), (_, y)| (x.start_time).cmp(y.start_time));
             }
         }
 
@@ -650,7 +652,7 @@ impl<'a> SessionSummary<'a> {
                 "  {: >7}    {}    {: <30}",
                 dir.pid,
                 dir,
-                fullpath,
+                fullpath.to_str_lossy(),
             )?;
         }
 
@@ -701,7 +703,7 @@ impl<'a> SessionSummary<'a> {
             SortEventsBy::Pid => {
                 io_events.par_sort_by(|x, y| (x.pid).cmp(&y.pid));
             }
-            SortEventsBy::Time => {
+            SortEventsBy::Time | SortEventsBy::Count => {
                 io_events.par_sort_by(|x, y| (x.time).cmp(y.time));
             }
         }
