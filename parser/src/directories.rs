@@ -7,7 +7,6 @@ use petgraph::prelude::*;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DirectoryData<'a> {
@@ -43,10 +42,52 @@ impl<'a> fmt::Display for DirectoryData<'a> {
     }
 }
 
+// A naive iterator over path ancestors
+// Does not attempt to normalize paths
+struct PathSplit<'a> {
+    path: &'a [u8],
+}
+
+impl<'a> PathSplit<'a> {
+    pub fn new(path: &'a [u8]) -> PathSplit<'a> {
+        PathSplit { path }
+    }
+}
+
+impl<'a> Iterator for PathSplit<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        if self.path.is_empty() {
+            return None;
+        }
+
+        if self.path == b"/" {
+            self.path = &*b"";
+            return Some(b"/");
+        }
+
+        match self.path.rfind_byte(b'/') {
+            Some(idx) if idx == 0 => {
+                self.path = &*b"";
+                Some(b"/")
+            }
+            Some(idx) => match self.path.get(..idx) {
+                Some(rem) => {
+                    self.path = rem;
+                    Some(self.path)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 pub fn directories_opened<'a>(
     pids: &[Pid],
     raw_data: &HashMap<Pid, PidData<'a>>,
-) -> HashMap<Pid, BTreeMap<&'a Path, DirectoryData<'a>>> {
+) -> HashMap<Pid, BTreeMap<&'a [u8], DirectoryData<'a>>> {
     let open_events = file_data::files_opened(&pids, raw_data, file_data::SortFilesBy::Time);
 
     pids.par_iter()
@@ -55,9 +96,12 @@ pub fn directories_opened<'a>(
 
             // Walking the full path for each event can be very
             // costly for pids with many open events on long paths.
+            // Each path element will trigger an update/insert on
+            // the map, so OPEN_CT * PATH_LEN inserts.
             // To minimize this cost, path relationships are
-            // cached as a graph we can use to fill in the map
-            // after all events are processed.
+            // cached in a graph, which we can walk once to calculate
+            // final totals after all events are processed,
+            // OPEN_CT + PATH_LEN inserts.
             let mut directory_graph = DiGraphMap::new();
 
             open_events.get(pid).map(|files| {
@@ -75,17 +119,11 @@ pub fn directories_opened<'a>(
 
 fn process_event<'a>(
     event: &FileData<'a>,
-    directory_data: &mut BTreeMap<&'a Path, DirectoryData<'a>>,
-    directory_graph: &mut DiGraphMap<&'a Path, u32>,
+    directory_data: &mut BTreeMap<&'a [u8], DirectoryData<'a>>,
+    directory_graph: &mut DiGraphMap<&'a [u8], u32>,
 ) {
-    if let Some(parent) = event
-        .file
-        .to_os_str()
-        .ok()
-        .map(|s| Path::new(s))
-        .and_then(|p| p.parent())
-        .filter(|p| !p.as_os_str().is_empty())
-    {
+    let mut splitter = PathSplit::new(event.file);
+    if let Some(parent) = splitter.next() {
         directory_data
             .entry(parent)
             .and_modify(|entry: &mut DirectoryData| {
@@ -108,11 +146,8 @@ fn process_event<'a>(
             ));
 
         let mut prev_path = parent;
-        for path in parent
-            .ancestors()
-            .skip(1) // Ancestors starts with self
-            .filter(|p| !p.as_os_str().is_empty())
-        {
+        for path in splitter {
+            // Stop parsing path once we find an existing edge
             if directory_graph.contains_edge(prev_path, path) {
                 break;
             }
@@ -128,8 +163,8 @@ fn process_event<'a>(
 // create an entry for '/var/log', but not for '/var' or '/'.
 // Using the graph, walk all paths and sum up events as we go.
 fn walk_dir_graph<'a>(
-    dir_graph_map: DiGraphMap<&'a Path, u32>,
-    dir_data: &mut BTreeMap<&'a Path, DirectoryData<'a>>,
+    dir_graph_map: DiGraphMap<&'a [u8], u32>,
+    dir_data: &mut BTreeMap<&'a [u8], DirectoryData<'a>>,
 ) {
     let mut dir_graph = dir_graph_map.into_graph::<u32>();
 
@@ -155,8 +190,8 @@ fn walk_dir_graph<'a>(
 fn process_node<'a>(
     node: NodeIndex,
     parent_node: NodeIndex,
-    graph: &Graph<&'a Path, u32, Directed, u32>,
-    data: &mut BTreeMap<&'a Path, DirectoryData<'a>>,
+    graph: &Graph<&'a [u8], u32, Directed, u32>,
+    data: &mut BTreeMap<&'a [u8], DirectoryData<'a>>,
 ) {
     // Copy data so we only have one ref when modifying the map
     let node_data = match data.get(graph[node]) {
@@ -185,6 +220,7 @@ mod tests {
     use super::*;
     use crate::syscall_data::build_syscall_data;
     use approx::assert_ulps_eq;
+    use bstr::B;
 
     #[test]
     fn dirs_captures_pid() {
@@ -200,7 +236,7 @@ mod tests {
         let pid_data_map = build_syscall_data(input);
         let dir_data = directories_opened(&[1070690], &pid_data_map);
         assert_eq!(
-            vec![&Path::new("/"), &Path::new("/etc")],
+            vec![&B("/"), &B("/etc")],
             dir_data[&1070690].keys().collect::<Vec<_>>()
         );
     }
@@ -219,11 +255,11 @@ mod tests {
 1070691 02:39:58.442542 openat(AT_FDCWD, "/opt/gitlab/embedded/lib/librt.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory) <0.000023>"##;
         let pid_data_map = build_syscall_data(input);
         let dir_data = directories_opened(&[1070691], &pid_data_map);
-        assert_eq!(10, dir_data[&1070691][&Path::new("/")].ct);
-        assert_eq!(1, dir_data[&1070691][&Path::new("/etc")].ct);
+        assert_eq!(10, dir_data[&1070691][B("/")].ct);
+        assert_eq!(1, dir_data[&1070691][B("/etc")].ct);
         assert_eq!(
             8,
-            dir_data[&1070691][&Path::new("/opt/gitlab/embedded/lib")].ct
+            dir_data[&1070691][b"/opt/gitlab/embedded/lib".as_ref()].ct
         );
     }
 
@@ -238,15 +274,15 @@ mod tests {
         let dir_data = directories_opened(&[1070690], &pid_data_map);
         assert_ulps_eq!(
             (0.00002 * 1000.0) * 5.0,
-            dir_data[&1070690][&Path::new("/")].duration
+            dir_data[&1070690][B("/")].duration
         );
         assert_ulps_eq!(
             (0.00002 * 1000.0) * 4.0,
-            dir_data[&1070690][&Path::new("/usr")].duration
+            dir_data[&1070690][B("/usr")].duration
         );
         assert_ulps_eq!(
             (0.00002 * 1000.0) * 3.0,
-            dir_data[&1070690][&Path::new("/usr/lib")].duration
+            dir_data[&1070690][B("/usr/lib")].duration
         );
     }
 
@@ -260,14 +296,68 @@ mod tests {
         let pid_data_map = build_syscall_data(input);
         let dir_data = directories_opened(&[1070690], &pid_data_map);
         assert_eq!(
-            b"02:39:58.426334".as_bstr(),
-            dir_data[&1070690][&Path::new("/")].start_time.as_bstr(),
+            B("02:39:58.426334"),
+            dir_data[&1070690][B("/")].start_time.as_bstr(),
             "Start time"
         );
         assert_eq!(
-            b"02:39:58.430197".as_ref().as_bstr(),
-            dir_data[&1070690][&Path::new("/")].end_time.as_bstr(),
+            B("02:39:58.430197"),
+            dir_data[&1070690][B("/")].end_time.as_bstr(),
             "End time"
+        );
+    }
+
+    #[test]
+    fn dirs_path_split_handles_absolute_path() {
+        let path = b"/usr/lib/locale/locale-archive".as_ref();
+        assert_eq!(
+            vec![B("/usr/lib/locale"), B("/usr/lib"), B("/usr"), B("/"),],
+            PathSplit::new(path)
+                .into_iter()
+                .map(|p| p.as_bstr())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn dirs_path_split_handles_relative_path() {
+        let path = b"target/release/strace-parser".as_ref();
+        assert_eq!(
+            vec![b"target/release".as_bstr(), b"target".as_bstr(),],
+            PathSplit::new(path)
+                .into_iter()
+                .map(|p| p.as_bstr())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn dirs_path_split_handles_double_dot() {
+        let path = b"../target/release/../debug/strace-parser.tar.gz".as_ref();
+        assert_eq!(
+            vec![
+                B("../target/release/../debug"),
+                B("../target/release/.."),
+                B("../target/release"),
+                B("../target"),
+                B(".."),
+            ],
+            PathSplit::new(path)
+                .into_iter()
+                .map(|p| p.as_bstr())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn dirs_path_split_handles_dot_slash() {
+        let path = b"./target/release/strace-parser".as_ref();
+        assert_eq!(
+            vec![B("./target/release"), B("./target"), B("."),],
+            PathSplit::new(path)
+                .into_iter()
+                .map(|p| p.as_bstr())
+                .collect::<Vec<_>>(),
         );
     }
 }

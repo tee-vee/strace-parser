@@ -5,6 +5,7 @@ use crate::syscall_stats::SyscallStats;
 use crate::{directories, file_data, file_data::SortFilesBy, io_data, pid_tree};
 use crate::{HashMap, HashSet, Pid, PidSummary, SortBy, SortEventsBy};
 
+use bstr::ByteSlice;
 use chrono::Duration;
 use petgraph::prelude::*;
 use rayon::prelude::*;
@@ -651,7 +652,7 @@ impl<'a> SessionSummary<'a> {
                 "  {: >7}    {}    {: <30}",
                 dir.pid,
                 dir,
-                fullpath.display(),
+                fullpath.to_str_lossy(),
             )?;
         }
 
