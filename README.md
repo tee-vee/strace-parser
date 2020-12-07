@@ -10,6 +10,7 @@ It can generate the following metrics:
    * Details of a process, including the statistics, files opened, and related PIDS
    * A list of all programs executed in session
    * A list of all file opened in session
+   * A list of the duration spent opening files in a directory and its children
    * A list of all read/write calls made in session
    * A histogram showing the quantized distribution of execution times for a given syscall
    * A `pstree` style graph of traced processes
@@ -46,10 +47,11 @@ Build with `cargo build --release`, the binary will be located at `target/releas
 
   * `exec` - List programs executed
   * `files` - List files opened
+  * `directories` - List total duration of `open` and `openat` calls performed in a directory and its children
   * `help` - Print a brief help message
-  * `io` - Show details of I/O syscalls: read, recv, recvfrom, recvmsg, send, sendmsg, sendto, and write
+  * `io` - Show details of I/O syscalls: `read`, `recv`, `recvfrom`, `recvmsg`, `send`, `sendmsg`, `sendto`, and `write`
   * `list-pids` - List of PIDs and their syscall stats
-  * `pid` - Details of PID(s) including syscalls stats, exec'd process, and slowest 'open' calls
+  * `pid` - Details of PID(s) including syscalls stats, exec'd process, and slowest `open` calls
   * `quantize` - Prints a log₂ scale histogram of the quantized execution times in μsecs for a syscall
   * `summary` - Overview of PIDs in session
   * `tree` - pstree-style view of traced processes
