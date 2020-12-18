@@ -148,7 +148,7 @@ impl<'a> SessionSummary<'a> {
     }
 
     fn clone_threads(&mut self) -> HashMap<Pid, Vec<Pid>> {
-        let mut execve_threads = HashMap::new();
+        let mut execve_threads = HashMap::default();
         let mut thread_graph = UnGraphMap::new();
 
         for (&pid, pid_summary) in &self.pid_summaries {
@@ -183,7 +183,7 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        let mut thread_map = HashMap::new();
+        let mut thread_map = HashMap::default();
         for (&pid, pid_summary) in self.pid_summaries.iter_mut() {
             let mut dfs = Dfs::new(&thread_graph, pid);
             while let Some(related) = dfs.next(&thread_graph) {
@@ -214,7 +214,7 @@ impl<'a> SessionSummary<'a> {
     }
 
     fn mirror_threads_to_siblings(&mut self) {
-        let mut symmetric_threads = HashMap::new();
+        let mut symmetric_threads = HashMap::default();
         for (&pid, summary) in &self.pid_summaries {
             for &thread in &summary.threads {
                 let thread_entry = symmetric_threads.entry(thread).or_insert_with(Vec::new);
@@ -231,7 +231,7 @@ impl<'a> SessionSummary<'a> {
     }
 
     fn futex_threads(&mut self) {
-        let mut addr_map = HashMap::new();
+        let mut addr_map = HashMap::default();
 
         // Only perform the futex linking on pids that existed prior to the trace
         // The threads of anything forked during tracing are already captured.
@@ -255,7 +255,7 @@ impl<'a> SessionSummary<'a> {
             }
         }
 
-        let mut thread_map: HashMap<Pid, HashSet<Pid>> = HashMap::new();
+        let mut thread_map: HashMap<Pid, HashSet<Pid>> = HashMap::default();
         for (addr, pids) in &addr_map {
             let mut dfs = Dfs::new(&addr_graph, addr);
 
