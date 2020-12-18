@@ -29,12 +29,33 @@ impl<'a> SessionSummary<'a> {
     ) -> SessionSummary<'a> {
         let mut summary = SessionSummary::default();
 
-        for (pid, syscall_stats) in session_stats {
-            summary.pid_summaries.insert(
-                *pid,
-                PidSummary::from((syscall_stats.as_slice(), &pid_data[pid])),
+        let pid_summaries = session_stats
+            .par_iter()
+            .fold(
+                || HashMap::default(),
+                |mut map, (pid, syscall_stats)| {
+                    let summary = PidSummary::from((syscall_stats.as_slice(), &pid_data[pid]));
+                    map.insert(*pid, summary);
+                    map
+                },
+            )
+            .reduce(
+                || HashMap::default(),
+                |m1, m2| {
+                    m2.into_iter().fold(m1, |mut map, (pid, summary)| {
+                        map.insert(pid, summary);
+                        map
+                    })
+                },
             );
-        }
+
+        summary.pid_summaries = pid_summaries;
+        //for (pid, syscall_stats) in session_stats {
+        //    summary.pid_summaries.insert(
+        //        *pid,
+        //        PidSummary::from((syscall_stats.as_slice(), &pid_data[pid])),
+        //    );
+        //}
 
         summary.all_time = summary
             .pid_summaries
