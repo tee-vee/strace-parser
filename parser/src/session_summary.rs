@@ -270,7 +270,7 @@ impl<'a> SessionSummary<'a> {
         let mut addr_graph: UnGraphMap<&[u8], i8> = UnGraphMap::new();
         for (&&addr, pids) in &addr_map {
             for (inner_addr, inner_pids) in addr_map.iter().filter(|(&&a, _)| a != addr) {
-                if !pids.is_disjoint(inner_pids) {
+                if pids.intersection(inner_pids).count() > 1 {
                     addr_graph.add_edge(addr, inner_addr, 1);
                 }
             }
