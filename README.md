@@ -23,7 +23,27 @@ parser cannot relate the processes.
 **NOTE**: `strace` must be run with the at least the `-tt -T -f -o <FILE>` flags for
 required data to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
-I recommend using `strace -fttTyyy -s 1024 -o <FILE>` as default flags.
+
+<details>
+<summary>
+I recommend using the following default flags:
+
+```sh
+strace -fttTyyy -s 1024 -o <FILE>
+```
+</summary>
+
+| strace flag        | man's description |
+| ------ | --- |
+| `-f`        | Trace  child  processes as they are created by currently traced processes as a result of the fork(2), vfork(2) and clone(2) system calls.       |
+| `-t`        | Prefix each line of the trace with the wall clock time. If given twice (`-tt`), the time printed will include the microseconds.                 |
+| `-T`        | Show the time spent in system calls.  This records the time difference between the beginning and the end of each system call.                   |
+| `-y`        | Print paths associated with file descriptor arguments.                                                                                          |
+| `-yy`       | Print protocol specific information associated with socket file descriptors.                                                                    |
+| `-s`        | Specify  the  maximum string size to print (the default is 32).  Note that filenames are not considered strings and are always printed in full. |
+| `-o <FILE>` | Write the trace output to the file filename rather than to stderr.                                                                              |
+
+</details>
 
 ## Building from Source
 
