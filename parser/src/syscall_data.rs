@@ -178,8 +178,9 @@ fn add_syscall_data<'a>(pid_data_map: &mut HashMap<Pid, PidData<'a>>, line_data:
                 b"open" | b"openat" => {
                     pid_entry.open_events.push(raw_data);
                 }
-                b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg" | b"sendto"
-                | b"write" => {
+                b"pread64" | b"pwrite64" | b"preadv" | b"preadv2" | b"pwritev" | b"pwritev2"
+                | b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg"
+                | b"sendto" | b"write" | b"writev" => {
                     pid_entry.io_events.push(raw_data);
                 }
                 _ => {}

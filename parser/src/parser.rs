@@ -267,8 +267,9 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
                         }
                     }
                 }
-                b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg" | b"sendto"
-                | b"write" => {
+                b"pread64" | b"pwrite64" | b"preadv" | b"preadv2" | b"pwritev" | b"pwritev2"
+                | b"read" | b"recv" | b"recvfrom" | b"recvmsg" | b"send" | b"sendmsg"
+                | b"sendto" | b"write" | b"writev" => {
                     // 17819 13:43:41.450318 read(22<pipe:[879334396]>,  <unfinished ...>
                     //                               ^^^^^^^^^^^^^^^^
                     if let Some(f) = syscall_split.next().and_then(|s| {
@@ -329,8 +330,9 @@ pub fn parse_line<'a>(bytes: &'a [u8]) -> Option<LineData<'a>> {
             //                                                                          ^
             if end_tokens.peek().is_none() {
                 match syscall {
-                    b"clone" | b"fork" | b"vfork" | b"read" | b"recv" | b"recvfrom"
-                    | b"recvmsg" | b"send" | b"sendmsg" | b"sendto" | b"write" => {
+                    b"clone" | b"fork" | b"vfork" | b"pread64" | b"pwrite64" | b"preadv"
+                    | b"preadv2" | b"pwritev" | b"pwritev2" | b"read" | b"recv" | b"recvfrom"
+                    | b"recvmsg" | b"send" | b"sendmsg" | b"sendto" | b"write" | b"writev" => {
                         rtn_cd = token.to_str().ok().and_then(|s| s.parse::<i32>().ok())
                     }
                     _ => {}
