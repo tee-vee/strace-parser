@@ -23,6 +23,10 @@ parser cannot relate the processes.
 **NOTE**: `strace` must be run with the at least the `-tt -T -f -o <FILE>` flags for
 required data to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
+**NOTE**: Because `strace` may slow down the target system by up to 10x,
+it is not recommended for use in a production environment
+except as a last resort. See [this article](http://www.brendangregg.com/blog/2014-05-11/strace-wow-much-syscall.html)
+for more information on the performance impacts of `strace`.
 
 <details>
 <summary>
@@ -46,11 +50,6 @@ strace -fttTyyy -s 1024 -o <FILE>
 </details>
 
 ## Building from Source
-
-**NOTE**: Because `strace` may slow down the target system by up to 10x,
-it is not recommended for use in a production environment
-except as a last resort. See [this article](http://www.brendangregg.com/blog/2014-05-11/strace-wow-much-syscall.html)
-for more information on the performance impacts of `strace`.
 
 You'll need the Rust compiler 1.42 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
 
