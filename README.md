@@ -23,7 +23,7 @@ parser cannot relate the processes.
 **NOTE**: `strace` must be run with the at least the `-tt -T -f -o <FILE>` flags for
 required data to be captured. Including `-yyy` will provide file details in the `io` subcommand.
 
-**Warning: Because `strace` may slow down the target system by up to 10x,
+**WARNING: Because `strace` may slow down the target system by up to 10x,
 it is not recommended for use in a production environment
 except as a last resort. See [this article](http://www.brendangregg.com/blog/2014-05-11/strace-wow-much-syscall.html)
 for more information on the performance impacts of `strace`.**
