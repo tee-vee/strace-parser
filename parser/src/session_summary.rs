@@ -513,13 +513,13 @@ impl<'a> SessionSummary<'a> {
         writeln!(stdout(), "\nPrograms Executed\n")?;
         writeln!(
             stdout(),
-            "  {: <6}    {: >4}    {: <16}    {: <}",
+            "  {: <6}    {: >10}    {: <16}    {: <}",
             "pid",
             "exit",
             "time",
             "program",
         )?;
-        writeln!(stdout(), "  ------    ----    ---------------     -------")?;
+        writeln!(stdout(), "  ------    ----------    ---------------     -------")?;
 
         for pid in pids_to_print.iter() {
             if let Some(pid_summary) = self.pid_summaries.get(&pid) {
@@ -527,7 +527,7 @@ impl<'a> SessionSummary<'a> {
                     for (cmd, time) in exec.iter() {
                         writeln!(
                             stdout(),
-                            "  {: <6}    {: >4}    {: <16}    {: <}",
+                            "  {: <6}    {: >10}    {: <16}    {: <}",
                             pid,
                             pid_summary
                                 .exit
