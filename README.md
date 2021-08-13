@@ -49,6 +49,20 @@ strace -fttTyyy -s 1024 -o <FILE>
 
 </details>
 
+Aside from these default flags, you will also want to attach `strace` to a `PID` with the `-p` flag.\
+The `PID` to `strace` for depends on what you want to trace. For reference, you can use the following values:
+
+| trace | `PID` |
+| ----- | ----- |
+| Sidekiq | `$(pgrep -fd, sidekiq)` |
+
+For example:
+
+```sh
+# Strace Sidekiq
+sudo strace -fttTyyy -s 1024 -o /tmp/sidekiq_trace -p $(pgrep -fd, sidekiq)
+```
+
 ## Building from Source
 
 You'll need the Rust compiler 1.42 or above, which can be obtained at [https://rustup.rs/](https://rustup.rs/).
