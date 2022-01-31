@@ -285,6 +285,8 @@ Programs Executed
   28916        0    21:16:56.538270     /bin/grep -x gitlabhq_production
 ```
 
+Processes with non-0 exits or terminated by a signal may indicate an error.
+
 ---
 
 #### files
