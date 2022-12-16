@@ -352,7 +352,7 @@ I/O Performed
 
 Prints a log₂ scale histogram of the quantized execution times in μsecs for a given syscall.
 
-`strace-parser quantize [FLAGS] [OPTIONS] <SYSCALL>`
+`strace-parser <INPUT> quantize [FLAGS] [OPTIONS] <SYSCALL>`
 
 **Args**:
    * `<SYSCALL>` - Syscall to analyze
@@ -396,7 +396,7 @@ relationships using the addresses of private `futex` calls. Spurious relationshi
 separate processes happen to use the same address for a `futex`. This method is not used for any processes
 forked/cloned during the trace. The relationships of these will always be accurate.
 
-`strace-parser tree [FLAGS]`
+`strace-parser <INPUT> tree [FLAGS]`
 
 **Flags**:
    * `-t, --truncate` - Truncate commands to 50 characters to prevent line wrapping
