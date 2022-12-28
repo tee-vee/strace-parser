@@ -9,7 +9,7 @@ It can generate the following metrics:
    * Statistics on each type of syscall made for a given number of proccesses
    * Details of a process, including the statistics, files opened, and related PIDS
    * A list of all programs executed in session
-   * A list of all file opened in session
+   * A list of all files opened in session
    * A list of the duration spent opening files in a directory and its children
    * A list of all read/write calls made in session
    * A histogram showing the quantized distribution of execution times for a given syscall
