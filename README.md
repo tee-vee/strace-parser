@@ -150,7 +150,7 @@ Print a list of the syscall stats of the top PIDs.
        * `user_time`
 
 ```
-$ strace-parser trace.txt list_pids --count 2 --sort syscalls
+$ strace-parser trace.txt list-pids --count 2 --sort syscalls
 Details of Top 2 PIDs by Syscall Count
 -----------
 
