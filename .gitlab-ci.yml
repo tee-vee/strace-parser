@@ -30,7 +30,7 @@ release_build:
     - sha.txt
   only:
     refs:
-      - master
+      - main
       - tags
 
 benches:
