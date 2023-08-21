@@ -567,3 +567,7 @@ Based on this, we can guess that example 1 is bottlenecked by block I/O, while e
 
 * PID reuse is not handled; separate processes with the same PID will be tracked as a single entity.
 * Existing thread relationships are not removed when from a process when it executes `execve`.
+
+## Examples
+
+`strace-parser <input file> f | grep -v ENOENT | awk  '{print $5}' | uniq` - Find all of the code paths that were actually loaded
