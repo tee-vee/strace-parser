@@ -570,4 +570,4 @@ Based on this, we can guess that example 1 is bottlenecked by block I/O, while e
 
 ## Examples
 
-`strace-parser <input file> f | grep -v ENOENT | awk  '{print $5}' | uniq` - Find all of the code paths that were actually loaded
+`strace-parser <input file> files | grep -v ENOENT | awk  '{print $5}' | uniq` - Find all file paths that were opened without an `ENOENT` error.
